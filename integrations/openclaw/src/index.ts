@@ -80,6 +80,7 @@ export default definePluginEntry({
   register(api) {
     api.registerTool({
       name: "sage_handoff",
+      label: "SAGE handoff",
       description:
         "Send raw structured application-level facts or state to another agent through SAGE. " +
         "Pass only what the receiver should know; SAGE performs semantic encoding automatically.",
@@ -96,16 +97,23 @@ export default definePluginEntry({
       }),
       async execute(_id, params, toolContext) {
         const cfg = settings({}, toolContext);
+        const p = params as {
+          receiver: string;
+          content: Record<string, unknown>;
+          correlationId?: string;
+          priority?: number;
+          budgetTokens?: number;
+        };
         const details = await request<any>(cfg, "/v1/bus/handoff", {
           method: "POST",
           body: JSON.stringify({
-            receiver: params.receiver,
+            receiver: p.receiver,
             sender: cfg.agentId,
-            content: structuredContent(params.content),
+            content: structuredContent(p.content),
             workspace: cfg.workspace,
-            correlation_id: params.correlationId,
-            priority: params.priority ?? 0,
-            budget_tokens: params.budgetTokens,
+            correlation_id: p.correlationId,
+            priority: p.priority ?? 0,
+            budget_tokens: p.budgetTokens,
           }),
         });
         return { content: [{ type: "text", text: JSON.stringify(details) }], details };
@@ -114,11 +122,13 @@ export default definePluginEntry({
 
     api.registerTool({
       name: "sage_poll",
+      label: "SAGE poll",
       description: "Poll pending SAGE handoffs for the active agent.",
       parameters: Type.Object({ limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })) }),
       async execute(_id, params, toolContext) {
         const cfg = settings({}, toolContext);
-        const query = new URLSearchParams({ workspace: cfg.workspace, limit: String(params.limit ?? 20), claim: "false" });
+        const p = params as { limit?: number };
+        const query = new URLSearchParams({ workspace: cfg.workspace, limit: String(p.limit ?? 20), claim: "false" });
         const details = await request<any[]>(cfg, `/v1/bus/pull/${encodeURIComponent(cfg.agentId)}?${query}`);
         return { content: [{ type: "text", text: JSON.stringify(details) }], details };
       },
@@ -126,11 +136,13 @@ export default definePluginEntry({
 
     api.registerTool({
       name: "sage_ack",
+      label: "SAGE acknowledge",
       description: "Acknowledge a SAGE handoff after consuming it.",
       parameters: Type.Object({ messageId: Type.String() }),
       async execute(_id, params, toolContext) {
         const cfg = settings({}, toolContext);
-        const details = await request<any>(cfg, `/v1/bus/${encodeURIComponent(params.messageId)}/ack`, {
+        const p = params as { messageId: string };
+        const details = await request<any>(cfg, `/v1/bus/${encodeURIComponent(p.messageId)}/ack`, {
           method: "POST",
           body: JSON.stringify({ receiver: cfg.agentId, workspace: cfg.workspace }),
         });
@@ -141,7 +153,7 @@ export default definePluginEntry({
     api.on("agent_turn_prepare", async (event, ctx) => {
       const cfg = settings(event, ctx);
       if (!cfg.autoInject) return;
-      const modelBudget = Number(ctx?.contextTokenBudget ?? event?.contextTokenBudget ?? 0);
+      const modelBudget = Number(ctx?.contextTokenBudget ?? 0);
       const injectBudget = modelBudget > 0
         ? Math.min(cfg.maxInjectTokens, Math.max(64, Math.floor(modelBudget * cfg.contextBudgetFraction)))
         : cfg.maxInjectTokens;
@@ -152,7 +164,7 @@ export default definePluginEntry({
       });
       const messages = await request<any[]>(cfg, `/v1/bus/context/${encodeURIComponent(cfg.agentId)}?${query}`);
       if (!messages.length) return;
-      const runId = String(ctx?.runId ?? event?.runId ?? ctx?.sessionKey ?? "default");
+      const runId = String(ctx?.runId ?? ctx?.sessionKey ?? "default");
       rememberClaim(runId, { cfg, ids: messages.map((m) => m.message_id) });
       return {
         appendContext:
@@ -162,7 +174,7 @@ export default definePluginEntry({
     });
 
     api.on("agent_end", async (event, ctx) => {
-      const runId = String(ctx?.runId ?? event?.runId ?? ctx?.sessionKey ?? "default");
+      const runId = String(ctx?.runId ?? ctx?.sessionKey ?? "default");
       const pending = claimedByRun.get(runId);
       if (!pending) return;
       claimedByRun.delete(runId);
