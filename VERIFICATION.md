@@ -9,12 +9,46 @@
 | Repository | https://github.com/NeuralBinary/SAGE |
 | Credits | @NeuralBinary, @ro0ti |
 | Public version | v0.2 |
-| Package version | 0.2.1 |
+| Package version | 0.2.2 |
 | Protocol | sage/0.2 |
 | Wire | 2 |
 | Database baseline | 0001_sage_0_2 |
 
 This report records qualification of the clean v0.2 first-deployment baseline on July 31, 2026. No pre-v0.2 protocol reader, compatibility layer, or migration chain is shipped.
+
+## v0.2.2 patch verification
+
+v0.2.2 is a patch release over the v0.2.1 baseline. Protocol `sage/0.2`, wire
+version `2`, the `0001_sage_0_2` migration baseline, and the 13 normative TCK
+vectors are unchanged.
+
+Verified for v0.2.2 in the release worktree (branch `sage/release-0.2.2`):
+
+- The packaged wheel `sage_agent_protocol-0.2.2-py3-none-any.whl` installs
+  into a fresh virtual environment and imports as 0.2.2.
+- Issue #1 regression fix: with the service started from a working directory
+  outside the repository, the default database URL resolves to the user home
+  directory (`sqlite:///$HOME/sage.db`) and never to a working-directory
+  relative `./sage.db`. An explicit `SAGE_DATABASE_URL` is preserved exactly.
+- The full automated suite passes against the installed wheel: 111 tests.
+- The Python TCK passes 13/13 vectors from the installed wheel.
+- `scripts/release_check.py` passes every version-consistency, protocol,
+  migration, schema, spec/protobuf, and TCK-drift check for v0.2.2; its only
+  failure is the artifact-presence gate for the OpenClaw `dist/` outputs,
+  which cannot be built in this worktree (see pending items).
+
+Pending, completed by the release workflow after merge:
+
+- OpenClaw npm type-check, build, and TCK: Issue #3 restores the adapter build
+  surface and the missing conformance source; this worktree predates that
+  merge, so `integrations/openclaw/dist/index.js` and
+  `integrations/openclaw/dist/conformance.js` cannot be produced here.
+- JavaScript and Go conformance, differential fuzzing, the staging/Docker
+  quick-start gate, `scripts/package_check.py` against the built v0.2.2
+  assets, and the computed SHA-256 checksums.
+
+The sections below record the v0.2.1 baseline qualification and remain the
+reference for surfaces unchanged by v0.2.2.
 
 ## v0.2 hardening scope
 

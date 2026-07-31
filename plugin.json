@@ -1,6 +1,6 @@
 {
   "name": "SAGE",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Vendor-neutral semantic communication runtime and durable bus for AI agents.",
   "runtime": "multi-adapter",
   "entrypoints": {
