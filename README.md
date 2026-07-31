@@ -9,7 +9,7 @@ SAGE is a vendor-neutral semantic communication runtime and durable context bus 
 | Repository | https://github.com/NeuralBinary/SAGE |
 | Credits | @NeuralBinary, @ro0ti |
 | Version | v0.2 |
-| Package version | 0.2.0 |
+| Package version | 0.2.1 |
 | Protocol | `sage/0.2` |
 | Wire | `2` |
 | License | MIT |
@@ -61,6 +61,19 @@ Agent runtimes and model hosts
 ```
 
 SAGE owns semantic payload and shared-context behavior. A2A owns peer-agent lifecycle. MCP is an optional tool/context surface. Framework adapters use each host's supported lifecycle hooks.
+
+## Fast path
+
+Start with [Getting started](docs/GETTING_STARTED.md). The repository is directly installable, and GitHub releases ship separate runtime, Hermes, and OpenClaw assets.
+
+```text
+Python/runtime   -> sage_agent_protocol-0.2.1-py3-none-any.whl
+Hermes Agent     -> sage-hermes-plugin-v0.2.1.zip
+OpenClaw         -> sage-agent-openclaw-sage-0.2.1.tgz
+Source checkout  -> sage-plugin-v0.2.1.zip or git clone
+```
+
+The Hermes adapter is standalone and works with the official immutable Docker image by installing into the persistent Hermes data directory. OpenClaw can install directly from the source adapter directory or from the packed release asset.
 
 ## Installation
 

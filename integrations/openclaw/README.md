@@ -1,8 +1,24 @@
-# SAGE OpenClaw adapter
+# SAGE for OpenClaw
 
-This native plugin exposes SAGE bus tools, claims cross-agent handoffs in `agent_turn_prepare`, and ACKs them from `agent_end` only when OpenClaw reports a successful run. Failed/unknown runs are left for lease-based redelivery.
+The native OpenClaw plugin exposes SAGE handoff tools, injects claimed peer context during turn preparation, and ACKs it only after OpenClaw reports a successful run.
 
-Install the packaged adapter with OpenClaw's deterministic local npm-pack source:
+## Source checkout
+
+Build the adapter once, then install or link the local plugin directory:
+
+```bash
+cd integrations/openclaw
+npm install
+npm run build
+cd ../..
+openclaw plugins install --link ./integrations/openclaw
+openclaw plugins enable sage
+openclaw plugins inspect sage --runtime --json
+```
+
+## GitHub release asset
+
+Install the packed release asset:
 
 ```bash
 openclaw plugins install npm-pack:./sage-agent-openclaw-sage-0.2.1.tgz
@@ -10,6 +26,8 @@ openclaw plugins enable sage
 openclaw plugins inspect sage --runtime --json
 ```
 
-Because the adapter uses `agent_turn_prepare` and `agent_end`, a trusted non-bundled install must permit conversation access; prompt injection must also be enabled. Configure the `sage` plugin entry with `allowConversationAccess: true` and do not set `allowPromptInjection: false`.
+For noninteractive installs, OpenClaw can require `--force` for a reviewed local archive or npm-pack source.
 
-Set plugin config for `url`, `agentId`, `workspace`, `apiKey`, `autoInject`, `maxInjectTokens`, and `contextBudgetFraction`.
+Configure `url`, `agentId`, `workspace`, `apiKey`, `autoInject`, `maxInjectTokens`, and `contextBudgetFraction`, or use `SAGE_URL`, `SAGE_AGENT_ID`, `SAGE_WORKSPACE`, and `SAGE_API_KEY` where applicable.
+
+`sage_handoff.content` is structured application data. The adapter rejects SAGE semantic envelopes and prevents the model from owning wire encoding.

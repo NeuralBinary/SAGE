@@ -73,7 +73,7 @@ def profile(platform: str) -> IntegrationProfile:
         raise KeyError(f"unsupported integration platform: {platform}") from exc
 
 
-def config_for(platform: str, base_url: str, agent_id: str) -> IntegrationConfigResponse:
+def config_for(platform: str, base_url: str, agent_id: str, workspace: str = "default") -> IntegrationConfigResponse:
     p = profile(platform)
     base = base_url.rstrip("/")
     mcp_url = base + "/mcp"
@@ -82,16 +82,17 @@ def config_for(platform: str, base_url: str, agent_id: str) -> IntegrationConfig
     config: dict[str, object] = {
         "sage_url": base,
         "agent_id": agent_id,
+        "workspace": workspace,
         "mcp_url": mcp_url,
         "a2a_extension": "urn:uuid:f81af17b-cc6a-5cdf-8a0f-51116b2e6a8d",
     }
     if p.id == "hermes":
         config["remote_mcp_url"] = mcp_url
-        files["env"] = f"SAGE_URL={base}\nSAGE_AGENT_ID={agent_id}\n"
-        commands = ["pip install ./sage_agent_protocol-0.2.1-py3-none-any.whl", "hermes plugins enable sage"]
+        files["env"] = f"SAGE_URL={base}\nSAGE_AGENT_ID={agent_id}\nSAGE_WORKSPACE={workspace}\n"
+        commands = ['unzip sage-hermes-plugin-v0.2.1.zip -d "${HERMES_HOME:-$HOME/.hermes}/plugins"', "hermes plugins enable sage"]
     elif p.id == "openclaw":
         config["remote_mcp_url"] = mcp_url
-        files["env"] = f"SAGE_URL={base}\nSAGE_AGENT_ID={agent_id}\n"
+        files["env"] = f"SAGE_URL={base}\nSAGE_AGENT_ID={agent_id}\nSAGE_WORKSPACE={workspace}\n"
         commands = ["openclaw plugins install npm-pack:./sage-agent-openclaw-sage-0.2.1.tgz", "openclaw plugins enable sage", "openclaw plugins inspect sage --runtime --json"]
     elif p.id == "claude":
         config["remote_mcp_url"] = mcp_url

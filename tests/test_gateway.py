@@ -189,3 +189,21 @@ def test_eval_reports_lossless_plain_transport_baselines():
         assert baselines["raw_msgpack_bytes"] > 0
         assert baselines["raw_gzip_json_bytes"] > 0
         assert baselines["sage_msgpack_bytes"] > 0
+
+
+def test_integration_config_hermes_release_asset() -> None:
+    from sage_plugin.integrations import config_for
+
+    cfg = config_for("hermes", "http://sage:8080", "hermes-a", "team")
+    assert cfg.config["workspace"] == "team"
+    assert "SAGE_WORKSPACE=team" in cfg.files["env"]
+    assert any("sage-hermes-plugin-v0.2.1.zip" in command for command in cfg.commands)
+
+
+def test_integration_config_openclaw_release_asset() -> None:
+    from sage_plugin.integrations import config_for
+
+    cfg = config_for("openclaw", "http://sage:8080", "claw-a", "team")
+    assert cfg.config["workspace"] == "team"
+    assert "SAGE_WORKSPACE=team" in cfg.files["env"]
+    assert any("sage-agent-openclaw-sage-0.2.1.tgz" in command for command in cfg.commands)

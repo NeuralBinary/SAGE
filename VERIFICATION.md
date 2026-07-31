@@ -52,9 +52,7 @@ Implemented capabilities include:
 
 ## Functional qualification
 
-The final working tree contains 102 automated tests. The full suite passes.
-
-The Hermes adapter regression coverage requires `sage_handoff.content` to be a structured JSON object, accepts a defensively parsed JSON-object string, rejects plain text, and rejects already-encoded SAGE semantic envelopes before they can be encoded again.
+The final working tree contains 104 automated tests. The full suite passes.
 
 Coverage includes transport encode/decode, durable handoff/claim/ACK/NACK, lease recovery, partition claims, ordering, idempotency, quotas, backpressure, identity-scoped authorization, semantic memory, contradictions, causal invalidation, information-flow labels, content-addressed references, selective disclosure, zero-copy forwarding, immutable states, checkpoints, reachability cleanup, concepts, learned patterns, source trust, holdout validation, counterfactual validation, receiver calibration, drift handling, semantic safety, signatures, federation, pub/sub, routing, A2A, economics, Inspector output, adapter-facing delivery, configuration validation, HTTP limits, W3C trace context, serialization properties, state patch properties, concurrency, codebook releases, Merkle synchronization, and bounded large-vocabulary lookup.
 
@@ -164,12 +162,12 @@ The final 200-iteration local SQLite latency gate passes all configured ceilings
 
 | Operation | p50 | p95 | max | Gate |
 | --- | ---: | ---: | ---: | ---: |
-| Core encode | 13.479 ms | 17.732 ms | 20.814 ms | p95 <= 40 ms |
-| Core decode | 0.007 ms | 0.010 ms | 0.222 ms | p95 <= 10 ms |
-| HTTP send | 17.073 ms | 24.278 ms | 204.199 ms | p95 <= 75 ms |
-| HTTP receive | 1.687 ms | 2.654 ms | 5.424 ms | p95 <= 50 ms |
+| Core encode | 13.232 ms | 17.926 ms | 81.182 ms | p95 <= 40 ms |
+| Core decode | 0.007 ms | 0.009 ms | 0.216 ms | p95 <= 10 ms |
+| HTTP send | 15.686 ms | 20.172 ms | 39.107 ms | p95 <= 75 ms |
+| HTTP receive | 1.588 ms | 1.992 ms | 2.531 ms | p95 <= 50 ms |
 
-The final 30-iteration encode query profile records 6.960 ms p50, 16.473 ms p95, 28.823 ms p99, 22 SQL statements at median, and 27 SQL statements maximum. The release ceiling is 40 statements.
+The final 30-iteration encode query profile records 5.965 ms p50, 9.881 ms p95, 27.936 ms p99, 22 SQL statements at median, and 27 SQL statements maximum. The release ceiling is 40 statements.
 
 These values are local regression measurements and are not service-level claims for remote databases, networks, embedding services, telemetry exporters, or model providers.
 
@@ -233,11 +231,11 @@ References use SHA-256 content identity while grants carry access, selective-fie
 
 ## Distribution qualification
 
-The Python wheel builds as `sage_agent_protocol-0.2.1-py3-none-any.whl`. `scripts/package_check.py` verifies package metadata, author, Hermes entry point, protocol specification, protobuf binding, nested JSON Schemas, TCK implementation matrix, and TCK vectors directly from the wheel archive.
+The Python wheel builds as `sage_agent_protocol-0.2.1-py3-none-any.whl`. `scripts/package_check.py` verifies package metadata, author, Hermes entry point, protocol specification, protobuf binding, nested JSON Schemas, TCK implementation matrix, and TCK vectors directly from the wheel archive. The source tree also ships a standalone Hermes plugin directory and installer; release consistency requires the standalone adapter to remain byte-identical to the packaged Hermes adapter.
 
 The wheel installs into an isolated target, imports as 0.2.1 with author NeuralBinary, exposes `sage = sage_plugin.hermes_plugin`, contains all 11 normative JSON Schemas under `sage_plugin/spec/schemas/`, and passes 13/13 TCK vectors plus 250/250 malformed-wire checks from the installed package.
 
-The OpenClaw archive builds as `@sage-agent/openclaw-sage@0.2.1`. `scripts/package_check.py` verifies its metadata, author, credits, plugin manifest, runtime, conformance runner, and TCK content. The packed JavaScript runtime and conformance runner pass syntax checking and its independent TCK passes 13/13 vectors.
+The OpenClaw archive builds as `@sage-agent/openclaw-sage@0.2.1`. `scripts/package_check.py` verifies its metadata, author, credits, plugin manifest, runtime, conformance runner, and TCK content. The packed JavaScript runtime and conformance runner pass syntax checking, its independent TCK passes 13/13 vectors, and the adapter harness verifies object content, defensive JSON-object recovery, plain-text rejection, and semantic-envelope rejection.
 
 ## Reproducibility and release policy
 
@@ -259,7 +257,7 @@ All locally executable v0.2 functional, protocol, semantic-safety, security, mig
 
 ## Source archive qualification
 
-The deterministic source ZIP is extracted into a separate directory and qualified independently from the working tree. The archive-level run passes the release, security, architecture, invariant, generated-schema, and generated-protocol checks. It passes all 102 automated tests, all 13 Python TCK vectors, all 13 JavaScript TCK vectors, all 13 Go TCK vectors, 250/250 malformed-wire mutations, and 1,000 differential cross-runtime comparisons.
+The deterministic source ZIP is extracted into a separate directory and qualified independently from the working tree. The archive-level run passes the release, security, architecture, invariant, generated-schema, and generated-protocol checks. It passes all 104 automated tests, all 13 Python TCK vectors, all 13 JavaScript TCK vectors, all 13 Go TCK vectors, 250/250 malformed-wire mutations, and 1,000 differential cross-runtime comparisons.
 
 A fresh database built from the extracted source reaches `0001_sage_0_2 (head)` and `alembic check` reports no new upgrade operations. OpenAPI builds as 3.1.0 with 81 paths.
 

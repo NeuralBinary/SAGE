@@ -21,6 +21,7 @@ verify:
 	PYTHONPATH=src python scripts/generate_protocol_artifacts.py --check
 	PYTHONPATH=src python -m sage_plugin.conformance --json
 	python scripts/conformance_matrix.py
+	node scripts/openclaw_adapter_check.mjs
 	PYTHONPATH=src python scripts/differential_fuzz.py --iterations 250
 	PYTHONPATH=src python scripts/chaos_suite.py
 	pytest -q

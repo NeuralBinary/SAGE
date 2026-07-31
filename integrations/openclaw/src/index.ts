@@ -52,6 +52,27 @@ function rememberClaim(runId: string, value: { cfg: Required<Config>; ids: strin
   claimedByRun.set(runId, value);
 }
 
+function structuredContent(value: unknown): Record<string, unknown> {
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      throw new Error("sage_handoff.content must be a JSON object, not plain text");
+    }
+  }
+  if (value === null || Array.isArray(value) || typeof value !== "object") {
+    throw new Error("sage_handoff.content must be a JSON object");
+  }
+  const content = value as Record<string, unknown>;
+  const envelopeKeys = ["concepts", "literals", "references", "provenance"];
+  if (envelopeKeys.every((key) => Object.prototype.hasOwnProperty.call(content, key))) {
+    throw new Error(
+      "sage_handoff.content appears to be an encoded SAGE semantic envelope; pass raw application-level fields instead",
+    );
+  }
+  return content;
+}
+
 export default definePluginEntry({
   id: "sage",
   name: "SAGE Semantic Bus",
@@ -59,10 +80,16 @@ export default definePluginEntry({
   register(api) {
     api.registerTool({
       name: "sage_handoff",
-      description: "Send a compact durable handoff to any SAGE-connected agent.",
+      description:
+        "Send raw structured application-level facts or state to another agent through SAGE. " +
+        "Pass only what the receiver should know; SAGE performs semantic encoding automatically.",
       parameters: Type.Object({
         receiver: Type.String(),
-        content: Type.Unknown(),
+        content: Type.Object({}, {
+          additionalProperties: true,
+          description:
+            "Raw application-level JSON object. Do not pass serialized JSON or SAGE protocol structures.",
+        }),
         correlationId: Type.Optional(Type.String()),
         priority: Type.Optional(Type.Integer()),
         budgetTokens: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -74,7 +101,7 @@ export default definePluginEntry({
           body: JSON.stringify({
             receiver: params.receiver,
             sender: cfg.agentId,
-            content: params.content,
+            content: structuredContent(params.content),
             workspace: cfg.workspace,
             correlation_id: params.correlationId,
             priority: params.priority ?? 0,

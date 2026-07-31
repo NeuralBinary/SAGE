@@ -101,6 +101,7 @@ jobs:
       - run: npm run tck
         working-directory: integrations/openclaw
       - run: node --check integrations/openclaw/dist/index.js
+      - run: node scripts/openclaw_adapter_check.mjs
       - run: npm pack --ignore-scripts
         working-directory: integrations/openclaw
       - run: python ../../scripts/package_check.py --openclaw sage-agent-openclaw-sage-0.2.1.tgz

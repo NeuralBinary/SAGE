@@ -70,6 +70,7 @@ def main() -> None:
 
     hermes_yaml = (ROOT / "integrations/hermes/sage/plugin.yaml").read_text(encoding="utf-8")
     require(re.search(r'^version:\s*["\']?0\.2\.1["\']?\s*$', hermes_yaml, re.MULTILINE) is not None, "Hermes manifest version drift")
+    require((ROOT / "integrations/hermes/sage/__init__.py").read_bytes() == (ROOT / "src/sage_plugin/hermes_plugin.py").read_bytes(), "standalone Hermes adapter drift")
 
     init_py = (ROOT / "src/sage_plugin/__init__.py").read_text(encoding="utf-8")
     protocol_py = (ROOT / "src/sage_plugin/protocol_spec.py").read_text(encoding="utf-8")
@@ -97,7 +98,13 @@ def main() -> None:
         "scripts/generate_protocol_artifacts.py",
         "scripts/generate_specs.py",
         "scripts/package_check.py",
+        "scripts/openclaw_adapter_check.mjs",
         "integrations/go/conformance.go",
+        "integrations/hermes/README.md",
+        "integrations/hermes/install.sh",
+        "integrations/hermes/sage/__init__.py",
+        "integrations/hermes/sage/plugin.yaml",
+        "docs/GETTING_STARTED.md",
         "integrations/openclaw/dist/index.js",
         "integrations/openclaw/dist/conformance.js",
         "integrations/openclaw/tck/core.json",
