@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -10,7 +11,8 @@ from sqlalchemy.orm import Session
 from .codec import SageCodec
 from .references import ReferenceAccessError, ReferenceExpiredError
 from .config import Settings
-from .db_models import BusMessage, MessageAudit
+from .db_models import BusMessage, MessageAudit, OrderingCounter
+from .resilience import QuotaManager
 from .schemas import Budget, EncodeRequest, Packet, Provenance
 
 
@@ -29,6 +31,37 @@ class SemanticBus:
         self.db = db
         self.settings = settings
         self.codec = SageCodec(db, settings)
+        self.quotas = QuotaManager(db, settings)
+
+    def _next_sequence(self, workspace: str, ordering_key: str) -> int:
+        now = _utcnow()
+        dialect = self.db.bind.dialect.name if self.db.bind is not None else ""
+        if dialect in {"sqlite", "postgresql"}:
+            if dialect == "sqlite":
+                from sqlalchemy.dialects.sqlite import insert
+            else:
+                from sqlalchemy.dialects.postgresql import insert
+            stmt = insert(OrderingCounter).values(
+                workspace=workspace, ordering_key=ordering_key, sequence_no=1, updated_at=now
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[OrderingCounter.workspace, OrderingCounter.ordering_key],
+                set_={"sequence_no": OrderingCounter.sequence_no + 1, "updated_at": now},
+            ).returning(OrderingCounter.sequence_no)
+            return int(self.db.execute(stmt).scalar_one())
+        counter = self.db.scalar(
+            select(OrderingCounter)
+            .where(OrderingCounter.workspace == workspace, OrderingCounter.ordering_key == ordering_key)
+            .with_for_update()
+        )
+        if counter is None:
+            counter = OrderingCounter(workspace=workspace, ordering_key=ordering_key, sequence_no=1)
+            self.db.add(counter)
+            self.db.flush()
+            return 1
+        counter.sequence_no += 1
+        self.db.flush()
+        return int(counter.sequence_no)
 
     def handoff(
         self,
@@ -44,10 +77,20 @@ class SemanticBus:
         ttl_seconds: int | None = None,
         budget_tokens: int | None = None,
         source_ids: list[str] | None = None,
+        idempotency_key: str | None = None,
+        partition_key: str | None = None,
+        ordering_key: str | None = None,
     ) -> BusMessage:
         receiver = receiver.strip()
         if not receiver:
             raise ValueError("receiver is required")
+        if idempotency_key:
+            existing = self.db.scalar(select(BusMessage).where(BusMessage.workspace == workspace, BusMessage.idempotency_key == idempotency_key))
+            if existing is not None:
+                if existing.receiver != receiver or existing.sender != sender:
+                    raise ValueError("idempotency key reused for a different handoff")
+                return existing
+        self.quotas.enforce_handoff(workspace, sender)
         result = self.codec.encode(
             EncodeRequest(
                 content=content,
@@ -63,6 +106,11 @@ class SemanticBus:
         now = _utcnow()
         effective_ttl = ttl_seconds if ttl_seconds is not None else self.settings.default_bus_ttl_seconds
         expires_at = now + timedelta(seconds=effective_ttl) if effective_ttl else None
+        partition_seed = partition_key or ordering_key or receiver
+        partition = hashlib.sha256(partition_seed.encode("utf-8")).hexdigest()[:8]
+        partition_index = int(partition, 16) % self.settings.bus_partition_count
+        effective_partition = f"p{partition_index:04d}"
+        sequence_no = self._next_sequence(workspace, ordering_key) if ordering_key else None
         item = BusMessage(
             id="M" + uuid.uuid4().hex,
             packet_id=result.packet.id or "",
@@ -71,6 +119,10 @@ class SemanticBus:
             workspace=workspace,
             run_id=run_id,
             correlation_id=correlation_id,
+            idempotency_key=idempotency_key,
+            partition_key=effective_partition,
+            ordering_key=ordering_key,
+            sequence_no=sequence_no,
             priority=priority,
             status="pending",
             wire=self.codec.compact(result.packet),
@@ -96,19 +148,29 @@ class SemanticBus:
         priority: int = 0,
         ttl_seconds: int | None = None,
         source_ids: list[str] | None = None,
+        idempotency_key: str | None = None,
+        partition_key: str | None = None,
+        ordering_key: str | None = None,
     ) -> BusMessage:
         if not refs:
             raise ValueError("at least one ref is required")
+        if idempotency_key:
+            existing = self.db.scalar(select(BusMessage).where(BusMessage.workspace == workspace, BusMessage.idempotency_key == idempotency_key))
+            if existing is not None:
+                if existing.receiver != receiver or existing.sender != sender:
+                    raise ValueError("idempotency key reused for a different handoff")
+                return existing
+        self.quotas.enforce_handoff(workspace, sender)
         for ref_id in refs:
             item = self.codec.refs.get(ref_id, actor=sender, workspace=workspace)
             if item is None:
                 raise KeyError(ref_id)
             grant = self.codec.refs.grant_metadata(ref_id, actor=sender, workspace=workspace)
-            if grant.owner not in {None, sender}:
-                raise PermissionError("only a reference owner can forward it")
+            if grant.owner != sender:
+                raise PermissionError("only the explicit reference owner can forward it")
             self.codec.refs.grant(
                 ref_id, workspace=workspace, owner=grant.owner, acl=list(set(grant.acl) | {receiver}),
-                allowed_paths=grant.allowed_paths, tier=grant.tier, provenance=grant.provenance,
+                allowed_paths=grant.allowed_paths, tier=grant.tier, provenance=grant.provenance, sensitivity=grant.sensitivity,
             )
         packet = Packet(
             id=self.codec._packet_id(), cb=self.settings.codebook, sender=sender, receiver=receiver, act="handoff",
@@ -124,9 +186,14 @@ class SemanticBus:
         effective_ttl = ttl_seconds if ttl_seconds is not None else self.settings.default_bus_ttl_seconds
         expires_at = now + timedelta(seconds=effective_ttl) if effective_ttl else None
         wire = self.codec.compact(packet)
+        partition_seed = partition_key or ordering_key or receiver
+        partition = hashlib.sha256(partition_seed.encode("utf-8")).hexdigest()[:8]
+        effective_partition = f"p{int(partition, 16) % self.settings.bus_partition_count:04d}"
+        sequence_no = self._next_sequence(workspace, ordering_key) if ordering_key else None
         item = BusMessage(
             id="M" + uuid.uuid4().hex, packet_id=packet.id or "", sender=sender, receiver=receiver, workspace=workspace,
-            run_id=run_id, correlation_id=correlation_id, priority=priority, status="pending", wire=wire,
+            run_id=run_id, correlation_id=correlation_id, idempotency_key=idempotency_key, partition_key=effective_partition,
+            ordering_key=ordering_key, sequence_no=sequence_no, priority=priority, status="pending", wire=wire,
             strategy="zero_copy", estimated_tokens=max(1, len(str(wire)) // 4), wire_bytes=len(packed), expires_at=expires_at,
         )
         self.db.add(item)
@@ -139,7 +206,7 @@ class SemanticBus:
         self.db.flush()
         return item
 
-    def _eligible(self, receiver: str, workspace: str, now: datetime) -> Any:
+    def _eligible(self, receiver: str, workspace: str, now: datetime, partition: str | None = None) -> Any:
         lease_cutoff = now - timedelta(seconds=self.settings.bus_claim_lease_seconds)
         deliverable_status = or_(
             BusMessage.status == "pending",
@@ -149,12 +216,15 @@ class SemanticBus:
                 BusMessage.claimed_at <= lease_cutoff,
             ),
         )
-        return and_(
+        conditions = [
             BusMessage.workspace == workspace,
             BusMessage.receiver == receiver,
             deliverable_status,
             or_(BusMessage.expires_at.is_(None), BusMessage.expires_at > now),
-        )
+        ]
+        if partition is not None:
+            conditions.append(BusMessage.partition_key == partition)
+        return and_(*conditions)
 
     def pull(
         self,
@@ -164,12 +234,13 @@ class SemanticBus:
         limit: int = 20,
         claim: bool = True,
         budget_tokens: int | None = None,
+        partition: str | None = None,
     ) -> list[BusMessage]:
         now = _utcnow()
         stmt = (
             select(BusMessage)
-            .where(self._eligible(receiver, workspace, now))
-            .order_by(BusMessage.priority.desc(), BusMessage.created_at, BusMessage.id)
+            .where(self._eligible(receiver, workspace, now, partition))
+            .order_by(BusMessage.priority.desc(), BusMessage.ordering_key, BusMessage.sequence_no, BusMessage.created_at, BusMessage.id)
             .limit(max(1, min(limit, 100)))
         )
         if claim:
@@ -226,6 +297,10 @@ class SemanticBus:
         item.claimed_at = None
         self.db.flush()
         return item
+
+    def backpressure(self, *, workspace: str = "default") -> dict[str, Any]:
+        status = self.quotas.backpressure(workspace)
+        return {"state": status.state, "pending": status.pending, "limit": status.limit, "ratio": status.ratio}
 
     def pending_count(self, *, receiver: str, workspace: str = "default") -> int:
         now = _utcnow()

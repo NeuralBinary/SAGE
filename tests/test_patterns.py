@@ -29,6 +29,9 @@ def pattern_settings(**overrides):
         pattern_auto_activate=True,
         pattern_counterfactual_required=True,
         pattern_counterfactual_min_samples=1,
+        pattern_holdout_min_samples=1,
+        pattern_holdout_min_sources=1,
+        pattern_holdout_min_fidelity=0.9,
         pattern_utility_min_score=0.0,
         semantic_cache_enabled=False,
         pattern_min_source_diversity=1,
@@ -75,7 +78,7 @@ def test_pattern_lifecycle_candidate_shadow_active_and_wire_use():
         db.commit()
         assert pattern.status == "validated"
         store.record_counterfactual(
-            pattern.pattern_id, full_success=1.0, compressed_success=1.0, semantic_fidelity=1.0
+            pattern.pattern_id, full_success=1.0, compressed_success=1.0, semantic_fidelity=1.0, validation_id="test-holdout"
         )
         db.commit()
         assert pattern.status == "active"
@@ -111,7 +114,7 @@ def test_pattern_slots_preserve_dynamic_values():
         db.commit()
         assert pattern.status == "validated"
         store.record_counterfactual(
-            pattern.pattern_id, full_success=1.0, compressed_success=1.0, semantic_fidelity=1.0
+            pattern.pattern_id, full_success=1.0, compressed_success=1.0, semantic_fidelity=1.0, validation_id="test-holdout"
         )
         db.commit()
         assert pattern.status == "active"

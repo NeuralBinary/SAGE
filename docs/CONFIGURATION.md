@@ -60,6 +60,7 @@ SAGE configuration uses environment variables with the `SAGE_` prefix. Names bel
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
+| `SAGE_LEARNING_MODE` | `observe` | Serving mode records evidence without promoting vocabulary. `managed` allows controlled promotion workflows. |
 | `SAGE_PATTERN_LEARNING_ENABLED` | `true` | Enables persistent higher-order pattern learning. |
 | `SAGE_PATTERN_STRING_CONSTANTS_ENABLED` | `false` | Allows string literals to become stable template constants. Disabled by default to reduce accidental identity/PII vocabulary. |
 | `SAGE_PATTERN_MIN_COMPONENTS` | `2` | Minimum components in a learned pattern. |
@@ -93,6 +94,12 @@ SAGE configuration uses environment variables with the `SAGE_` prefix. Names bel
 | `SAGE_CALIBRATION_BUCKETS` | `10` | Reliability calibration buckets. |
 | `SAGE_CALIBRATION_MIN_SAMPLES` | `20` | Samples before receiver calibration is treated as mature evidence. |
 | `SAGE_CALIBRATION_MAX_ECE` | `0.08` | Maximum expected calibration error allowed by activation policy. |
+| `SAGE_PATTERN_HOLDOUT_MIN_SAMPLES` | `5` | Minimum holdout observations before activation. |
+| `SAGE_PATTERN_HOLDOUT_MIN_SOURCES` | `3` | Minimum distinct holdout validation sources before activation. |
+| `SAGE_PATTERN_HOLDOUT_MIN_FIDELITY` | `0.995` | Minimum holdout semantic fidelity. |
+| `SAGE_PATTERN_DRIFT_WINDOW_MINUTES` | `60` | Rolling reliability window used for drift detection. |
+| `SAGE_PATTERN_DRIFT_MIN_SAMPLES` | `20` | Minimum observations before a drift window can demote an active pattern. |
+| `SAGE_PATTERN_DRIFT_MAX_DROP` | `0.05` | Maximum tolerated reliability drop before cooling an active pattern. |
 
 ## Embeddings
 
@@ -116,6 +123,19 @@ SAGE configuration uses environment variables with the `SAGE_` prefix. Names bel
 | `SAGE_BUS_CLAIM_LEASE_SECONDS` | `60` | Claim lease before unacknowledged messages can be reclaimed. |
 | `SAGE_DEFAULT_BUS_TTL_SECONDS` | unset | Default bus message TTL. |
 | `SAGE_AUDIT_RETENTION_DAYS` | `30` | Audit retention window. |
+| `SAGE_STATE_RETENTION_DAYS` | `90` | Minimum age before unreachable immutable states may be collected. |
+| `SAGE_CHECKPOINT_INTERVAL_REVISIONS` | `1000` | Immutable-state revision interval for automatic content-addressed checkpoints. |
+| `SAGE_IDEMPOTENCY_TTL_SECONDS` | `86400` | Server-side idempotency record lifetime. |
+| `SAGE_QUOTA_WINDOW_SECONDS` | `60` | Rolling quota counter window. |
+| `SAGE_QUOTA_HANDOFFS_PER_WINDOW` | `10000` | Workspace handoff allowance per quota window. |
+| `SAGE_QUOTA_HANDOFFS_PER_AGENT_WINDOW` | `2000` | Per-agent handoff allowance within a workspace per quota window. |
+| `SAGE_QUOTA_REF_BYTES_PER_WINDOW` | `1000000000` | Workspace reference-write byte allowance per quota window. |
+| `SAGE_QUOTA_PATTERN_OBSERVATIONS_PER_WINDOW` | `100000` | Workspace pattern-observation allowance per quota window. |
+| `SAGE_MAX_PENDING_MESSAGES_PER_WORKSPACE` | `100000` | Pending/claimed queue ceiling used for backpressure. |
+| `SAGE_BACKPRESSURE_DEGRADED_RATIO` | `0.70` | Queue ratio that reports degraded state. |
+| `SAGE_BACKPRESSURE_THROTTLED_RATIO` | `0.90` | Queue ratio that rejects new handoffs with throttling. |
+| `SAGE_BUS_PARTITION_COUNT` | `64` | Deterministic logical partition count for durable handoffs. |
+| `SAGE_GC_RETAIN_AUDIT_REPLAY` | `true` | Retains reference roots needed by audit/replay during reachability cleanup. |
 
 ## Signatures and federation
 

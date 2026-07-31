@@ -297,7 +297,9 @@ class BusMessage(Base):
     __tablename__ = "bus_messages"
     __table_args__ = (
         Index("ix_bus_receiver_status_priority", "workspace", "receiver", "status", "priority"),
+        Index("ix_bus_partition_order", "workspace", "partition_key", "ordering_key", "sequence_no"),
         Index("ix_bus_run_created", "run_id", "created_at"),
+        UniqueConstraint("workspace", "idempotency_key", name="uq_bus_idempotency"),
     )
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
@@ -307,6 +309,10 @@ class BusMessage(Base):
     workspace: Mapped[str] = mapped_column(String(128), default="default", index=True)
     run_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     correlation_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    partition_key: Mapped[str] = mapped_column(String(128), default="default", index=True)
+    ordering_key: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    sequence_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
     priority: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     wire: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
@@ -367,6 +373,7 @@ class ReferenceGrant(Base):
     allowed_paths: Mapped[list[str]] = mapped_column(JSON, default=list)
     tier: Mapped[str] = mapped_column(String(16), default="warm", index=True)
     provenance: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    sensitivity: Mapped[list[str]] = mapped_column(JSON, default=list)
     version: Mapped[int] = mapped_column(Integer, default=1)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -390,6 +397,7 @@ class SemanticFact(Base):
     confidence: Mapped[float] = mapped_column(Float, default=1.0)
     status: Mapped[str] = mapped_column(String(32), default="active", index=True)
     provenance: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    sensitivity: Mapped[list[str]] = mapped_column(JSON, default=list)
     valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -477,3 +485,160 @@ class FederationPeer(Base):
     details: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+class ModelIdentity(Base):
+    __tablename__ = "model_identities"
+    __table_args__ = (
+        UniqueConstraint("workspace", "receiver", "identity_hash", name="uq_model_identity"),
+        Index("ix_model_identity_active", "workspace", "receiver", "active"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workspace: Mapped[str] = mapped_column(String(128), default="default", index=True)
+    receiver: Mapped[str] = mapped_column(String(128), index=True)
+    provider: Mapped[str] = mapped_column(String(128), default="unknown")
+    model: Mapped[str] = mapped_column(String(256), default="unknown")
+    model_version: Mapped[str] = mapped_column(String(128), default="unknown")
+    runtime: Mapped[str] = mapped_column(String(128), default="unknown")
+    runtime_version: Mapped[str] = mapped_column(String(128), default="unknown")
+    config_hash: Mapped[str] = mapped_column(String(64), default="")
+    identity_hash: Mapped[str] = mapped_column(String(64), index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PatternValidationEvidence(Base):
+    __tablename__ = "pattern_validation_evidence"
+    __table_args__ = (
+        Index("ix_pattern_validation_pattern_split", "pattern_id", "split", "created_at"),
+        Index("ix_pattern_validation_receiver_model", "workspace", "receiver", "model_identity_hash"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    pattern_id: Mapped[int] = mapped_column(ForeignKey("learned_patterns.id"), index=True)
+    workspace: Mapped[str] = mapped_column(String(128), default="default", index=True)
+    split: Mapped[str] = mapped_column(String(16), default="holdout", index=True)
+    receiver: Mapped[str] = mapped_column(String(128), default="*", index=True)
+    model_identity_hash: Mapped[str] = mapped_column(String(64), default="*", index=True)
+    task_family: Mapped[str] = mapped_column(String(128), default="*", index=True)
+    full_success: Mapped[float] = mapped_column(Float, default=0.0)
+    compressed_success: Mapped[float] = mapped_column(Float, default=0.0)
+    fidelity: Mapped[float] = mapped_column(Float, default=0.0)
+    source_hash: Mapped[str] = mapped_column(String(64), default="", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ReliabilityWindow(Base):
+    __tablename__ = "reliability_windows"
+    __table_args__ = (
+        UniqueConstraint("workspace", "receiver", "model_identity_hash", "pattern_id", "task_family", "window_start", name="uq_reliability_window"),
+        Index("ix_reliability_drift", "workspace", "receiver", "model_identity_hash", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workspace: Mapped[str] = mapped_column(String(128), default="default", index=True)
+    receiver: Mapped[str] = mapped_column(String(128), index=True)
+    model_identity_hash: Mapped[str] = mapped_column(String(64), index=True)
+    pattern_id: Mapped[int | None] = mapped_column(ForeignKey("learned_patterns.id"), nullable=True, index=True)
+    task_family: Mapped[str] = mapped_column(String(128), default="*", index=True)
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    sample_count: Mapped[int] = mapped_column(Integer, default=0)
+    fidelity_sum: Mapped[float] = mapped_column(Float, default=0.0)
+    status: Mapped[str] = mapped_column(String(16), default="stable", index=True)
+    drift_score: Mapped[float] = mapped_column(Float, default=0.0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class CodebookRelease(Base):
+    __tablename__ = "codebook_releases"
+    __table_args__ = (
+        UniqueConstraint("namespace", "release", name="uq_codebook_release"),
+        Index("ix_codebook_release_active", "namespace", "status", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    namespace: Mapped[str] = mapped_column(String(128), index=True)
+    release: Mapped[str] = mapped_column(String(128), index=True)
+    merkle_root: Mapped[str] = mapped_column(String(64), index=True)
+    manifest: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    key_id: Mapped[str] = mapped_column(String(128), default="")
+    signature: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(16), default="active", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class StateCheckpoint(Base):
+    __tablename__ = "state_checkpoints"
+    __table_args__ = (
+        UniqueConstraint("workspace", "state_id", name="uq_state_checkpoint_state"),
+        Index("ix_state_checkpoint_workspace_created", "workspace", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    workspace: Mapped[str] = mapped_column(String(128), default="default", index=True)
+    state_id: Mapped[str] = mapped_column(ForeignKey("shared_states.id"), index=True)
+    revision: Mapped[int] = mapped_column(Integer)
+    payload_hash: Mapped[str] = mapped_column(String(64), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class IdempotencyRecord(Base):
+    __tablename__ = "idempotency_records"
+    __table_args__ = (
+        UniqueConstraint("workspace", "operation", "key", name="uq_idempotency_record"),
+        Index("ix_idempotency_expiry", "expires_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workspace: Mapped[str] = mapped_column(String(128), default="default", index=True)
+    operation: Mapped[str] = mapped_column(String(128), index=True)
+    key: Mapped[str] = mapped_column(String(128), index=True)
+    request_hash: Mapped[str] = mapped_column(String(64))
+    response: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
+
+class QuotaCounter(Base):
+    __tablename__ = "quota_counters"
+    __table_args__ = (
+        UniqueConstraint("workspace", "resource", "window_start", name="uq_quota_counter"),
+        Index("ix_quota_workspace_resource", "workspace", "resource", "window_start"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workspace: Mapped[str] = mapped_column(String(128), default="default", index=True)
+    resource: Mapped[str] = mapped_column(String(64), index=True)
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    used: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class OrderingCounter(Base):
+    __tablename__ = "ordering_counters"
+    __table_args__ = (UniqueConstraint("workspace", "ordering_key", name="uq_ordering_counter"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workspace: Mapped[str] = mapped_column(String(128), default="default", index=True)
+    ordering_key: Mapped[str] = mapped_column(String(128), index=True)
+    sequence_no: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class InformationFlowLabel(Base):
+    __tablename__ = "information_flow_labels"
+    __table_args__ = (
+        UniqueConstraint("workspace", "object_kind", "object_id", "label", name="uq_information_flow_label"),
+        Index("ix_information_flow_object", "workspace", "object_kind", "object_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workspace: Mapped[str] = mapped_column(String(128), default="default", index=True)
+    object_kind: Mapped[str] = mapped_column(String(32), index=True)
+    object_id: Mapped[str] = mapped_column(String(128), index=True)
+    label: Mapped[str] = mapped_column(String(64), index=True)
+    source_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+

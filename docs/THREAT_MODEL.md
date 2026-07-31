@@ -93,3 +93,16 @@ W3C trace context is propagated so one distributed trace can correlate agent, SA
 ## Required operator controls
 
 Production startup fails unless authentication, server database, managed migrations, explicit allowed hosts, and disabled interactive documentation are configured. Operators must provide TLS, network policy, secret storage, key rotation, database backup, audit retention, dependency monitoring, and infrastructure access control.
+
+
+## Fairness, backpressure, and retry abuse
+
+Tenant fairness is enforced at workspace and per-agent levels. Both quota counters are updated atomically so rejected agent work cannot consume another agent's shared allowance. Idempotency records prevent retry storms from multiplying logical writes; a reused key with a different request is rejected. Queue pressure transitions to degraded, throttled, then unavailable, and new work fails explicitly rather than exhausting database/worker capacity.
+
+## Holdout and drift poisoning
+
+Training observations and holdout validation are separate evidence classes. Activation requires distinct holdout source identities in addition to trust-scoped training diversity. Reliability is bound to receiver/model/runtime/configuration identity; a model/runtime change creates a new identity instead of inheriting historic calibration. Rolling windows cool active vocabulary when fidelity materially degrades.
+
+## Information flow
+
+Semantic facts and reference grants carry sensitivity labels. Derived information inherits the union of upstream labels; propagation cannot silently downgrade sensitivity. Selective resolution still applies field-level grants. Operators should map labels to organization-specific clearance enforcement at the policy boundary used by their adapters and federation layer.

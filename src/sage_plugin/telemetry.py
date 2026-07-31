@@ -7,12 +7,6 @@ from .config import Settings
 
 
 class Telemetry:
-    """Optional OpenTelemetry bridge using GenAI-style operation naming.
-
-    SAGE-specific measurements stay under the `sage.*` namespace while model usage
-    can coexist with standard `gen_ai.*` attributes emitted by provider SDKs.
-    """
-
     def __init__(self, settings: Settings) -> None:
         self.enabled = settings.otel_enabled
         self._trace = None
@@ -31,19 +25,57 @@ class Telemetry:
         if not self.enabled or self._trace is None:
             yield None
             return
-        with self._trace.start_as_current_span(f"sage.{operation}") as span:
-            span.set_attribute("gen_ai.operation.name", operation)
-            for key, value in attrs.items():
-                if value is not None and isinstance(value, (str, bool, int, float)):
-                    span.set_attribute(f"sage.{key}", value)
-            yield span
+        parent_context = None
+        traceparent = attrs.pop("traceparent", None)
+        tracestate = attrs.pop("tracestate", None)
+        if traceparent:
+            try:
+                from opentelemetry.propagate import extract
+                carrier = {"traceparent": traceparent}
+                if tracestate:
+                    carrier["tracestate"] = tracestate
+                parent_context = extract(carrier)
+            except Exception:
+                parent_context = None
+        try:
+            manager = self._trace.start_as_current_span(f"sage.{operation}", context=parent_context)
+            span = manager.__enter__()
+        except Exception:
+            yield None
+            return
+        try:
+            try:
+                span.set_attribute("gen_ai.operation.name", operation)
+                for key, value in attrs.items():
+                    if value is not None and isinstance(value, (str, bool, int, float)):
+                        span.set_attribute(f"sage.{key}", value)
+            except Exception:
+                pass
+            try:
+                yield span
+            except BaseException as exc:
+                try:
+                    manager.__exit__(type(exc), exc, exc.__traceback__)
+                except Exception:
+                    pass
+                raise
+            else:
+                try:
+                    manager.__exit__(None, None, None)
+                except Exception:
+                    pass
+        finally:
+            pass
 
     def add(self, name: str, value: int | float, **attrs: Any) -> None:
         if not self.enabled or self._meter is None:
             return
-        counter = self._counters.get(name)
-        if counter is None:
-            counter = self._meter.create_counter(f"sage.{name}")
-            self._counters[name] = counter
-        safe_attrs = {f"sage.{k}": v for k, v in attrs.items() if isinstance(v, (str, bool, int, float))}
-        counter.add(value, safe_attrs)
+        try:
+            counter = self._counters.get(name)
+            if counter is None:
+                counter = self._meter.create_counter(f"sage.{name}")
+                self._counters[name] = counter
+            safe_attrs = {f"sage.{k}": v for k, v in attrs.items() if isinstance(v, (str, bool, int, float))}
+            counter.add(value, safe_attrs)
+        except Exception:
+            return

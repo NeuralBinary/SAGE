@@ -3,8 +3,8 @@
 ## Recommended order
 
 1. Native hook/plugin adapter when the framework offers a safe lifecycle extension point.
-2. A2A when two agent runtimes communicate as peers.
-3. MCP for model/tool access and compatibility.
+2. A2A as the primary generic envelope when independent agent runtimes communicate as peers.
+3. MCP for model/tool/context access and compatibility.
 4. REST/Python runtime for custom orchestrators.
 
 The SAGE server stays the same in all cases.
@@ -34,3 +34,10 @@ Use `sage_plugin.a2a_adapter.pack_data_part` / `unpack_data_part` or the REST br
 ## Custom orchestrator
 
 Use `SageRuntime.handoff/poll/ack` directly. This is the smallest dependency surface and avoids model-visible tool calls entirely.
+
+
+## Protocol boundaries
+
+SAGE core does not import MCP. `scripts/architecture_check.py` enforces the adapter boundary. A2A carries SAGE structured data while retaining discovery, task/message lifecycle, streaming, cancellation, and collaboration semantics. SAGE owns the semantic payload, references, state/deltas, learned vocabulary, durable context, provenance, and receiver knowledge.
+
+The same wire packet must keep identical canonical MessagePack identity whether carried by a native adapter, A2A, MCP, REST, queue, or custom transport.

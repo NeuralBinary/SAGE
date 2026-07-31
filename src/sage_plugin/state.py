@@ -7,7 +7,9 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from .config import Settings
 from .db_models import SharedState
+from .checkpoints import CheckpointStore
 
 
 def _hash(value: Any, workspace: str = "default") -> str:
@@ -84,8 +86,10 @@ def apply_patch(target: Any, patch: Any) -> Any:
 
 
 class StateStore:
-    def __init__(self, db: Session) -> None:
+    def __init__(self, db: Session, settings: Settings | None = None) -> None:
         self.db = db
+        self.settings = settings
+        self.checkpoints = CheckpointStore(db, settings) if settings is not None else None
 
     def create(
         self,
@@ -117,6 +121,8 @@ class StateStore:
         )
         self.db.add(state)
         self.db.flush()
+        if self.checkpoints is not None:
+            self.checkpoints.maybe_create(state)
         return state
 
     def get(self, state_id: str, *, workspace: str | None = None) -> SharedState | None:
@@ -148,6 +154,17 @@ class StateStore:
             provenance=provenance,
         )
         return item, patch
+
+    def replay_plan(self, state_id: str, *, workspace: str = "default") -> dict[str, Any]:
+        target = self.get(state_id, workspace=workspace)
+        if target is None:
+            raise KeyError(state_id)
+        checkpoint = self.checkpoints.nearest(target) if self.checkpoints is not None else None
+        lineage = self.lineage(state_id, workspace=workspace)
+        if checkpoint is None:
+            return {"checkpoint": None, "states": [item.id for item in lineage]}
+        index = next((i for i, item in enumerate(lineage) if item.id == checkpoint.state_id), 0)
+        return {"checkpoint": checkpoint.id, "checkpoint_state": checkpoint.state_id, "states": [item.id for item in lineage[index + 1:]]}
 
     def lineage(self, state_id: str, *, workspace: str = "default") -> list[SharedState]:
         out: list[SharedState] = []

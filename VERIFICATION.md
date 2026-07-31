@@ -14,139 +14,255 @@
 | Wire | 2 |
 | Database baseline | 0001_sage_0_2 |
 
-This report records the local qualification performed on July 31, 2026 for the clean v0.2 first-deployment baseline. No pre-v0.2 compatibility reader or migration path is shipped.
+This report records qualification of the clean v0.2 first-deployment baseline on July 31, 2026. No pre-v0.2 protocol reader, compatibility layer, or migration chain is shipped.
 
-## Functional verification
+## v0.2 hardening scope
 
-The final working tree contains 81 automated tests. The full suite passes and covers transport encode/decode, durable handoff/claim/ACK behavior, identity-scoped authorization, semantic memory, contradictions, causal invalidation, content-addressed references, selective disclosure, state transitions, concepts, learned patterns, trust scopes, counterfactual validation, receiver calibration, semantic safety, signatures, federation, pub/sub, routing, A2A, economics, Inspector behavior, adapter-facing delivery, configuration validation, HTTP limits, wire-v2 trace context, deterministic serialization properties, state patch properties, concurrency, and large-vocabulary lookup.
+The release implements the full v0.2 hardening program across interoperability, concurrency, failure recovery, semantic reliability, scaling, observability, distribution, and release engineering.
 
-The Python protocol conformance kit passes all 13 normative vectors. A deterministic malformed-wire campaign passes 1,000 of 1,000 cases with the expected accept/reject behavior.
+Implemented capabilities include:
 
-An independent JavaScript conformance implementation passes the same 13 vectors. `scripts/conformance_matrix.py` executes every required implementation from `tck/implementations.json` and passes for Python and JavaScript.
+- multi-runtime protocol conformance across Python, JavaScript, and Go;
+- PostgreSQL/TLS three-node staging topology with migration-before-start orchestration;
+- end-to-end soak and worker/database disruption runners;
+- deterministic property and differential protocol checks;
+- decomposed HTTP domain routers and separated pattern structure/policy/reliability layers;
+- generated protocol artifacts with repository/package drift checks;
+- source-diverse holdout validation and receiver/model/task reliability calibration;
+- rolling reliability windows and automatic safe fallback on drift;
+- model identity pinned to provider, model build, runtime build, and configuration identity;
+- Merkle-partitioned codebook synchronization;
+- immutable content-addressed state checkpoints;
+- reachability-aware reference and state cleanup;
+- information-flow sensitivity propagation;
+- workspace and agent quotas, backpressure states, deterministic queue partitioning, and ordered streams;
+- idempotent mutating HTTP operations and durable at-least-once delivery;
+- critical/optional failure-domain isolation;
+- three-runtime TCK and differential fuzzing;
+- deterministic chaos qualification and explicit invariant catalog;
+- HTML and CLI Inspector surfaces with compression waterfall and decision trace;
+- provider/infrastructure/retrieval/retry economics and task utility per transmitted bit;
+- reproducible JSONL corpus format and model-matrix benchmark runner;
+- controlled candidate/shadow/holdout/active learned-language lifecycle;
+- deterministic signed codebook releases;
+- OpenTelemetry integration with W3C trace context and content-safe default attributes;
+- MCP isolated to the adapter boundary;
+- A2A binding kept at the peer-agent envelope boundary;
+- protocol wire version held at 2 throughout the hardening release.
 
-The property suite runs 250 nested canonical-serialization cases and 250 state diff/apply round trips. All pass.
+## Functional qualification
 
-Python byte compilation passes for source, tests, and release scripts.
+The final working tree contains 97 automated tests. The full suite passes.
 
-## Learned-language security
+Coverage includes transport encode/decode, durable handoff/claim/ACK/NACK, lease recovery, partition claims, ordering, idempotency, quotas, backpressure, identity-scoped authorization, semantic memory, contradictions, causal invalidation, information-flow labels, content-addressed references, selective disclosure, zero-copy forwarding, immutable states, checkpoints, reachability cleanup, concepts, learned patterns, source trust, holdout validation, counterfactual validation, receiver calibration, drift handling, semantic safety, signatures, federation, pub/sub, routing, A2A, economics, Inspector output, adapter-facing delivery, configuration validation, HTTP limits, W3C trace context, serialization properties, state patch properties, concurrency, codebook releases, Merkle synchronization, and bounded large-vocabulary lookup.
 
-Pattern evidence is source-aware and trust-scoped. Normal encoding attributes learning evidence to the authenticated logical sender; arbitrary provenance identifiers do not increase source diversity.
+The invariant catalog contains 21 release invariants. Every invariant maps to executable tests or conformance tooling. `scripts/invariant_check.py` passes.
 
-Promotion thresholds become stricter across session, project, workspace, domain, and federation scope. The default minimum distinct source counts are 2, 3, 4, 6, and 8 respectively. Dominant-source share and minimum trust are enforced in addition to lifecycle, savings, utility, semantic stability, and counterfactual requirements.
+## Protocol conformance
 
-Concurrent pattern observations use database conflict updates for evidence and candidate counters. Promotion uses row locking and rechecks for a concurrently created learned pattern before transition. The local contention qualification with six workers and four observations per worker records all 24 observations, preserves six-source diversity, stores all 24 evidence observations, and produces one promoted lifecycle result.
+The normative TCK contains 13 vectors.
 
-Receiver/model/task reliability is stored in calibration buckets. Compression can be suppressed for a receiver when measured fidelity is below policy. Calibration tracks empirical success, predicted confidence, expected calibration error, Brier score, and calibrated probability.
+| Runtime | Result |
+| --- | ---: |
+| Python | 13/13 |
+| JavaScript | 13/13 |
+| Go | 13/13 |
 
-## Semantic safety
+`scripts/conformance_matrix.py` executes all required runtimes from `tck/implementations.json` and passes.
 
-The semantic firewall preserves high-risk meaning through stricter thresholds and lossless fallback. Critical categories include negation, authorization, identity, irreversible instructions, quantities, money, deadlines, environment markers, and security constraints.
+The differential protocol runner executes 250 generated inputs and compares both independent runtimes against Python for canonical MessagePack identity and validation behavior. Each independent runtime passes 500 comparisons, for 1,000 cross-runtime comparisons total.
 
-Epistemic types distinguish fact, observation, inference, hypothesis, prediction, preference, instruction, and constraint. Contradictory claims coexist with provenance rather than overwriting one another. Dependency invalidation marks derived knowledge stale transitively.
+The Python malformed-wire campaign passes 1,000/1,000 mutations with the required accept/reject behavior.
 
-Large-vocabulary semantic matching never requires an unbounded scan. Exact lookup remains indexed. Fuzzy lookup permits exhaustive comparison only through 1,000 compatible concepts by default; larger vocabularies use deterministic LSH neighbor buckets with at most 512 selected candidates. If no safe candidate exists, the original semantic form is retained.
+Protocol identity is deterministic canonical MessagePack plus SHA-256. Canonical JSON remains the readable normalized form but is not used as cross-language byte identity because runtime floating-point string rendering is not guaranteed to be byte-identical.
 
-## Concurrency and delivery
+## Learned-language security and reliability
 
-The local durable-bus qualification runs eight concurrent producers with 20 messages each. All 160 messages are produced and all 160 are consumed without duplicate claims or lost delivery.
+Pattern observations are source-aware and carry trust scope. Repetition from one logical source cannot manufacture source diversity.
 
-The learned-pattern contention qualification runs six concurrent sources with four observations each. It records all 24 observations and six distinct source identities without splitting one semantic signature across duplicate lifecycle rows.
+Default distinct-source requirements are:
 
-SQLite qualification deliberately uses one consumer where database semantics do not provide PostgreSQL-style `SKIP LOCKED`. The PostgreSQL CI job runs configured multi-consumer qualification with eight workers and 20 messages per worker after applying the v0.2 migration.
+| Scope | Minimum distinct sources |
+| --- | ---: |
+| Session | 2 |
+| Project | 3 |
+| Workspace | 4 |
+| Domain | 6 |
+| Federation | 8 |
 
-Delivery remains at-least-once. Receiver knowledge advances only on acknowledgement. NACK and lease expiry preserve redelivery behavior.
+Promotion also evaluates source dominance, trust score, semantic stability, savings, task utility, lifecycle evidence, counterfactual fidelity, and holdout traffic.
 
-## Database verification
+Holdout traffic is distinct from candidate-learning evidence. A candidate progresses through candidate, shadow, validated, active, cooling, and retired states under policy. Production compression falls back to richer semantics when validation, receiver reliability, or drift policy is not satisfied.
 
-A fresh SQLite database upgrades from empty state directly to the sole `0001_sage_0_2` migration. `alembic check` returns `No new upgrade operations detected`, confirming that the baseline migration matches the current SQLAlchemy models. `alembic current` reports `0001_sage_0_2 (head)`.
+Receiver reliability is scoped to receiver, provider, model identifier, model version, runtime identifier, runtime version, runtime configuration hash, and task family. Calibration records empirical success, predicted confidence, calibrated probability, expected calibration error, and Brier score.
 
-The PostgreSQL CI job uses PostgreSQL 18 and sets `SAGE_TEST_USE_CONFIGURED_DB=true`, so the suite and configured concurrency qualification use PostgreSQL rather than the local SQLite test fixture.
+Rolling reliability windows detect meaningful fidelity decline and move affected learned patterns toward safe fallback without globally disabling unrelated receiver/model combinations.
 
-## API and protocol verification
+## Semantic safety and information flow
 
-The FastAPI OpenAPI document builds as OpenAPI 3.1.0 with 73 HTTP paths, title `SAGE`, and package version 0.2.0.
+The semantic firewall applies stricter preservation rules to negation, authorization, identity, irreversible instructions, quantities, money, deadlines, environment markers, explicit constraints, and security controls.
 
-Wire v2 carries validated W3C `traceparent` and optional `tracestate` metadata. REST transport imports valid trace headers only when the body has not already provided trace context. Invalid `traceparent` values return HTTP 422. Trace metadata participates in canonical encoding and signatures but never in authentication or authorization.
+Epistemic types distinguish fact, observation, inference, hypothesis, prediction, preference, instruction, and constraint. Contradictory claims coexist with provenance. Dependency invalidation marks downstream derived knowledge stale transitively.
 
-The repository protocol specification, protobuf binding, JSON Schemas, packaged protocol files, TCK vectors, and implementation matrix are release-checked for byte or semantic parity as applicable.
+Derived information inherits the union of upstream sensitivity labels. Sensitivity cannot be silently downgraded through derivation.
 
-## Performance verification
+Uncertain semantic optimization fails open to a richer literal or reference-backed representation. Failure of pattern learning, caching, telemetry, federation, or other optional optimization does not corrupt core lossless delivery.
 
-The final deterministic local latency gate uses 200 iterations on SQLite and passes all configured ceilings:
+## Durable delivery, fairness, and ordering
+
+Local concurrency qualification runs eight producers with 20 messages each. All 160 messages are produced and consumed.
+
+Messages can be claimed by deterministic partition. Partition-scoped workers receive only the requested shard. An optional ordering key allocates contiguous monotonic sequence numbers per stream while unrelated streams remain parallel.
+
+Workspace and agent handoff quotas are updated atomically. A failed agent-scoped quota check cannot consume shared workspace allowance. Queue state reports normal, degraded, throttled, or unavailable. Throttled and unavailable states reject new work explicitly.
+
+Mutating HTTP operations support principal/workspace/route-scoped idempotency keys. Repeating the same key and request returns the stored logical result; reusing the key with a different payload is rejected.
+
+Delivery remains at-least-once. Receiver knowledge advances only after acknowledgement. NACK and lease expiration preserve redelivery.
+
+The local deterministic chaos suite processes 64 messages, verifies one logical idempotent write path, and recovers 32 messages after claim-lease expiration.
+
+## Pattern contention
+
+The learned-pattern contention qualification runs six concurrent sources with four observations each. It records all 24 observations, all 24 source-evidence observations, and six distinct sources without splitting one semantic signature across duplicate candidate lifecycle rows.
+
+The qualification intentionally does not activate an unvalidated pattern. Activation requires holdout/counterfactual policy after source-diverse observation.
+
+## State, checkpoints, and cleanup
+
+State deltas are lossless and deterministic. Generated property checks verify that applying a computed delta reconstructs the exact target nested state.
+
+Checkpoints are content-addressed and chosen only from the target state's ancestry chain. Checkpoint lookup cannot cross a divergent state branch.
+
+Reference and state cleanup is reachability-aware. Live reference grants, undelivered packets, receiver knowledge, checkpoints, receiver current-state pointers, retained audit data, replay roots, and parent ancestry are retained according to policy. Expired unreachable objects are eligible for cleanup.
+
+## Codebook synchronization and releases
+
+Codebooks expose deterministic Merkle manifests. Synchronization compares roots and only descends into differing partitions. Diff logic derives partition width from compared manifests rather than assuming a fixed prefix length.
+
+Signed codebook releases are immutable and deterministic. The signed payload excludes wall-clock creation time so two nodes releasing identical semantic content with the same release identity produce the same signed content identity. Release signatures are verified with Ed25519 public keys.
+
+## Large-vocabulary qualification
+
+Exact lookup remains indexed. Fuzzy matching performs exhaustive comparison only below the configured scan limit. Larger vocabularies use deterministic locality-sensitive-hash buckets with bounded Hamming-neighbor search and a bounded candidate ceiling. If no safe match is found, SAGE retains the richer semantic representation.
+
+Final local SQLite measurements:
+
+| Concepts | Exact p50 | Exact p95 | Exact p99 | Fuzzy p50 | Fuzzy p95 | Fuzzy p99 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 0.199 ms | 0.267 ms | 0.516 ms | 1.191 ms | 1.446 ms | 4.948 ms |
+| 1,000 | 0.294 ms | 0.433 ms | 0.571 ms | 5.107 ms | 5.608 ms | 21.684 ms |
+| 5,000 | 0.293 ms | 0.438 ms | 0.561 ms | 5.967 ms | 14.563 ms | 15.552 ms |
+
+The dispatch-only scale workflow extends vocabulary qualification to 1,000,000 concepts by default and runs configurable sustained staging traffic without slowing ordinary pull-request qualification.
+
+## Latency and database query budget
+
+The final 200-iteration local SQLite latency gate passes all configured ceilings:
 
 | Operation | p50 | p95 | max | Gate |
 | --- | ---: | ---: | ---: | ---: |
-| Core encode | 13.352 ms | 16.533 ms | 29.638 ms | p95 <= 40 ms |
-| Core decode | 0.007 ms | 0.009 ms | 0.070 ms | p95 <= 10 ms |
-| HTTP transport send | 16.222 ms | 19.843 ms | 26.262 ms | p95 <= 75 ms |
-| HTTP transport receive | 1.299 ms | 1.770 ms | 3.157 ms | p95 <= 50 ms |
+| Core encode | 13.479 ms | 17.732 ms | 20.814 ms | p95 <= 40 ms |
+| Core decode | 0.007 ms | 0.010 ms | 0.222 ms | p95 <= 10 ms |
+| HTTP send | 17.073 ms | 24.278 ms | 204.199 ms | p95 <= 75 ms |
+| HTTP receive | 1.687 ms | 2.654 ms | 5.424 ms | p95 <= 50 ms |
 
-A 30-iteration encode query profile with pattern learning and semantic cache disabled reports 6.127 ms p50, 8.329 ms p95, 26.613 ms p99, a median of 21 SQL statements, and a maximum of 26 statements. The qualification ceiling is below 40 statements.
+The final 30-iteration encode query profile records 6.960 ms p50, 16.473 ms p95, 28.823 ms p99, 22 SQL statements at median, and 27 SQL statements maximum. The release ceiling is 40 statements.
 
-Local vocabulary qualification after the bounded-LSH tuning reports:
+These values are local regression measurements and are not service-level claims for remote databases, networks, embedding services, telemetry exporters, or model providers.
 
-| Concepts | Exact p95 | Fuzzy p95 |
-| ---: | ---: | ---: |
-| 100 | 0.250 ms | 1.372 ms |
-| 1,000 | 0.424 ms | 7.471 ms |
-| 5,000 | 0.347 ms | 14.097 ms |
+## Economics and model-matrix tooling
 
-These are local SQLite regression measurements. They are not service-level claims for remote databases, networks, embedding providers, or model providers.
+The economics layer records model-provider cost, SAGE infrastructure cost, retrieval cost, retry cost, total cost, task success, semantic loss, wire bytes, model tokens, and task utility per transmitted bit.
 
-## Security verification
+`scripts/model_matrix_benchmark.py` consumes a reproducible SAGE corpus and explicitly configured model commands. It compares raw context, caller-supplied summary/retrieval representations, state/reference strategies, structural SAGE, learned SAGE, and receiver-aware SAGE when those runtime strategies are supplied.
 
-Production configuration fails closed unless authentication is enabled, service credentials are configured, a server database is selected, managed migrations are enabled, explicit allowed hosts are provided, and interactive API documentation is disabled.
+No external model-provider result is reported in this local verification because provider credentials and heterogeneous model runtimes are not present in the execution environment. The benchmark runner does not fabricate provider measurements.
 
-Service and agent credentials cannot overlap. Agent credentials bind to workspace and agent identity. Control-plane routes remain service-only. Reference delegation and policy mutation require the explicit owner or service authority. Body sizes are bounded. Host validation is enabled in production. Private metrics and MCP require service authentication. Security headers and no-store behavior are applied on sensitive paths.
+## Inspector and observability
 
-Reference objects use SHA-256 content identity while grants hold access, selective-field policy, tier, TTL, and provenance. Optional AES-GCM encryption validates key material. Ed25519 signature-required mode cannot start without verification key material.
+SAGE exposes JSON, CLI, and HTML Inspector surfaces. Reports contain original/sent bytes, token estimates, receiver-known ratio, semantic-loss score, learned-pattern decisions, references, and a compression waterfall.
 
-The repository security gate passes across 47 Python files and checks AST safety, TLS settings, Compose credentials, container hardening, and project metadata.
+OpenTelemetry is optional and isolated from core delivery. SAGE emits operational protocol attributes by default rather than semantic message content. W3C `traceparent` and optional `tracestate` propagate through wire v2. Invalid trace context is rejected. Trace metadata is never used as an authorization signal.
 
-## Traceability and telemetry
+## Adapter architecture
 
-OpenTelemetry remains optional. A live local encode with telemetry enabled succeeds, records a valid packet, keeps payload content out of SAGE telemetry attributes, and leaves semantic behavior unchanged.
+SAGE Core owns semantic representation, durable state, references, learned language, routing, authorization state, and delivery semantics.
 
-Wire v2 propagates W3C trace context so distributed adapters can correlate agent, SAGE, storage, and downstream work without using trace metadata as an authorization signal.
+A2A remains the generic peer-agent lifecycle envelope. MCP remains an optional tool/context adapter. Hermes and OpenClaw use native lifecycle adapters. REST and Python provide framework-neutral runtime access.
 
-## Package verification
+The HTTP implementation is decomposed into transport, memory/state, learning/calibration, and semantic/routing routers. Pattern structure, policy, calibration, and reliability logic are separated from the core pattern lifecycle module. Architecture checks enforce the adapter-only MCP boundary and domain-router layout.
 
-The Python wheel builds successfully without dependency resolution during the build. It installs into an isolated target directory, imports as 0.2.0, exposes author `NeuralBinary`, exposes the Hermes entry point `sage_plugin.hermes_plugin`, and contains the v0.2 protocol specification, protobuf binding, wire schema, TCK vectors, and implementation matrix. The isolated installed package passes 13 of 13 TCK vectors and 250 of 250 malformed-wire checks.
+## Staging, soak, and disruption qualification
 
-The OpenClaw package packs as `@sage-agent/openclaw-sage@0.2.0`. The tarball contains the runtime, independent JavaScript conformance runner, v0.2 TCK vectors, plugin manifest, package metadata, and package documentation. The committed JavaScript runtime and conformance runner both pass `node --check`.
+The repository contains a production-shape staging topology with PostgreSQL 18, a one-shot migration service, three independent SAGE application nodes, TLS termination/load balancing, and non-root/read-only application containers.
 
-Project metadata parsing succeeds for 31 JSON files, `pyproject.toml`, YAML manifests, Compose, and CI configuration.
+`scripts/soak_cluster.py` measures completed handoff -> claim -> ACK lifecycles through the TLS load balancer. Its default duration is 24 hours. `scripts/cluster_chaos.py` can pause an application node, verify load-balancer failover, disrupt PostgreSQL, require readiness failure, restore the database, and verify durable delivery recovery.
 
-## Release consistency
+Normal CI runs a short staging gate. `.github/workflows/scale.yml` is dispatch-only and accepts vocabulary-size and soak-duration inputs for extended release-candidate qualification.
 
-The release checker enforces:
+Docker and a local PostgreSQL service are unavailable in this execution environment, so the multi-node staging topology and PostgreSQL-specific multi-consumer path are configured and CI-gated but are not represented as locally executed passes in this report.
 
-- SAGE, NeuralBinary, repository, credits, and v0.2 identity;
-- package 0.2.0, protocol sage/0.2, and wire 2;
-- one `0001_sage_0_2_baseline.py` migration;
-- repository/package protocol and TCK parity;
-- Python and JavaScript conformance matrix presence;
-- required trace, signature, epistemic, and pattern schema fields;
-- absence of obsolete development version markers;
-- absence of development filler prose in shipped documentation;
-- absence of runtime databases, caches, bytecode, nested package output, and egg metadata in the release source tree.
+## Database verification
 
-## Local environment limits
+A fresh SQLite database upgrades directly to the sole `0001_sage_0_2` migration. `alembic check` reports no new upgrade operations. `alembic current` reports `0001_sage_0_2 (head)`.
 
-The local execution environment uses Python 3.13.5 and Node 22.16.0. Docker, Ruff, mypy, protoc, and the optional MCP Python SDK are not installed locally and are not counted as locally executed checks.
+The PostgreSQL CI job uses PostgreSQL 18 with configured-database mode and runs the full suite plus multi-consumer delivery and ordered-stream qualification against PostgreSQL.
 
-CI provides dependency-backed jobs for Python 3.11 through 3.14, Ruff, PostgreSQL 18, dependency auditing, MCP server construction, OpenClaw dependency-backed type checking/building, Python wheel construction, the cross-runtime conformance matrix, and Docker image construction.
+## API and protocol artifacts
 
-The local PostgreSQL multi-consumer qualification is not executed because no PostgreSQL service is available in this environment. The local concurrency suite verifies producer contention, durable delivery, redelivery, and learned-pattern contention with SQLite; CI verifies the database-specific multi-consumer path on PostgreSQL.
+The FastAPI OpenAPI document builds as OpenAPI 3.1.0 with 81 paths, title `SAGE`, and version 0.2.0.
 
-## Source archive verification
+Normative JSON Schemas, protobuf binding, Markdown protocol specification, generated TypeScript/Go wire metadata, and TCK artifacts are generated or checked from the frozen v0.2 protocol model. The installed Python package mirrors the repository hierarchy under `sage_plugin/spec/schemas/`.
 
-The source ZIP is extracted into a separate directory and qualified independently of the working tree. The extracted source passes the release consistency gate, security gate, all 81 automated tests, all 13 Python TCK vectors, 250 of 250 malformed-wire checks, the required Python/JavaScript conformance matrix, and both OpenClaw JavaScript syntax checks.
+Schema generation and generated-artifact checks pass. Repository/package schema bytes, protocol specification bytes, protobuf bytes, TCK vectors, and implementation matrix are checked for drift.
 
-A fresh database created from the extracted source reaches the sole `0001_sage_0_2` head and `alembic check` reports no new upgrade operations.
+## Security qualification
 
-The extracted archive also passes a 100-iteration local latency gate with p95 measurements of 14.511 ms for core encode, 0.010 ms for core decode, 17.803 ms for HTTP transport send, and 1.845 ms for HTTP transport receive.
+Production configuration fails closed unless required authentication, service credentials, server database, managed migration mode, explicit hosts, and documentation policy are valid.
+
+Service and agent credentials cannot overlap. Agent credentials bind to workspace and agent identity. Control-plane routes remain service-only. Reference delegation and policy mutation require the explicit owner or service authority. Unowned shared references cannot be delegated by ordinary grantees.
+
+Request bodies are bounded. Production host validation is enabled. Sensitive metrics and MCP access require service authentication. Security headers and no-store behavior are applied on sensitive paths.
+
+References use SHA-256 content identity while grants carry access, selective-field policy, tier, TTL, sensitivity, and provenance. Optional AES-GCM encryption validates key material. Ed25519 signature-required mode cannot start without verification material.
+
+`scripts/security_check.py` passes across 74 Python files and checks AST safety, TLS/deployment policy, Compose credentials, container hardening, and project metadata.
+
+## Distribution qualification
+
+The Python wheel builds as `sage_agent_protocol-0.2.0-py3-none-any.whl`. `scripts/package_check.py` verifies package metadata, author, Hermes entry point, protocol specification, protobuf binding, nested JSON Schemas, TCK implementation matrix, and TCK vectors directly from the wheel archive.
+
+The wheel installs into an isolated target, imports as 0.2.0 with author NeuralBinary, exposes `sage = sage_plugin.hermes_plugin`, contains all 11 normative JSON Schemas under `sage_plugin/spec/schemas/`, and passes 13/13 TCK vectors plus 250/250 malformed-wire checks from the installed package.
+
+The OpenClaw archive builds as `@sage-agent/openclaw-sage@0.2.0`. `scripts/package_check.py` verifies its metadata, author, credits, plugin manifest, runtime, conformance runner, and TCK content. The packed JavaScript runtime and conformance runner pass syntax checking and its independent TCK passes 13/13 vectors.
+
+## Reproducibility and release policy
+
+`make verify` runs security, architecture, invariants, generated schema/artifact checks, TCK, the three-runtime conformance matrix, differential fuzzing, chaos recovery, full tests, latency, encode query budget, byte compilation, cleanup, and final source-tree release consistency.
+
+The dispatch scale workflow provides sustained vocabulary and staging soak qualification. The normal CI matrix covers Python 3.11 through 3.14, PostgreSQL 18, dependency auditing, OpenClaw install/type/build/TCK, MCP construction, Python wheel construction, cross-runtime conformance, Docker image construction, and the short staging cluster gate.
+
+## Local execution limits
+
+The local environment does not provide Docker, a PostgreSQL server, Ruff, mypy, protoc, or the optional MCP SDK. Those checks are not counted as locally executed.
+
+The local Node runtime is below the OpenClaw package's declared production engine floor, and OpenClaw development dependencies are not installed locally. The committed JavaScript runtime/conformance files and packed archive are locally syntax/TCK checked; dependency-backed TypeScript installation/build is CI-gated on the declared Node runtime.
+
+No live Claude, OpenAI, Hermes model provider, or other external model-provider economics run is claimed because provider credentials and those runtimes are absent.
 
 ## Result
 
-All locally executable v0.2 functional, protocol, security, migration, packaging, interoperability, and performance gates pass. This report records executed qualification and declared CI coverage; it does not claim that undiscovered defects are impossible.
+All locally executable v0.2 functional, protocol, semantic-safety, security, migration, packaging, interoperability, concurrency, chaos, invariant, performance, query-budget, and release-consistency gates pass in the working tree.
+
+## Source archive qualification
+
+The deterministic source ZIP is extracted into a separate directory and qualified independently from the working tree. The archive-level run passes the release, security, architecture, invariant, generated-schema, and generated-protocol checks. It passes all 97 automated tests, all 13 Python TCK vectors, all 13 JavaScript TCK vectors, all 13 Go TCK vectors, 250/250 malformed-wire mutations, and 1,000 differential cross-runtime comparisons.
+
+A fresh database built from the extracted source reaches `0001_sage_0_2 (head)` and `alembic check` reports no new upgrade operations. OpenAPI builds as 3.1.0 with 81 paths.
+
+The extracted source passes a 100-iteration latency gate with p95 values of 16.577 ms core encode, 0.011 ms core decode, 22.586 ms HTTP send, and 2.131 ms HTTP receive. Its 20-iteration encode database profile records 12.243 ms p95 and 27 SQL statements maximum under the 40-statement ceiling.
+
+The extracted source independently rebuilds both distribution formats. `scripts/package_check.py` passes against the archive-built Python wheel and OpenClaw package. The source archive retains `integrations/openclaw/dist/index.js`, `integrations/openclaw/dist/conformance.js`, and the OpenClaw TCK while excluding runtime databases, bytecode, cache directories, dependency directories, nested distribution archives, and top-level build output.
+
+All locally executable v0.2 gates therefore pass both in the finalized working tree and in an independently extracted source archive. This report distinguishes locally executed qualification from CI-configured qualification and does not claim that undiscovered defects are impossible.

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import math
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
@@ -17,6 +16,9 @@ from .codebook import Codebook
 from .compiler import SemanticUnit, normalize
 from .config import Settings
 from .db_models import Concept, LearnedPattern, PatternCandidate, PatternEdge, PatternReceiverMetric, PatternSourceEvidence
+from .reliability import ReliabilityMonitor
+from .pattern_policy import trust_ready, utility_score as calculate_utility_score
+from .resilience import QuotaManager
 
 
 @dataclass(frozen=True)
@@ -27,91 +29,7 @@ class PatternMatch:
     bindings: list[Any]
 
 
-def _path_shape(path: str) -> str:
-    return re.sub(r"\[\d+\]", "[]", path)
-
-
-def _literal_type(value: Any) -> str:
-    if value is None:
-        return "null"
-    if isinstance(value, bool):
-        return "bool"
-    if isinstance(value, int) and not isinstance(value, bool):
-        return "int"
-    if isinstance(value, float):
-        return "float"
-    if isinstance(value, str):
-        return "str"
-    return type(value).__name__
-
-
-def _constant_literal(value: Any, *, allow_strings: bool = False) -> bool:
-    if value is None or isinstance(value, bool):
-        return True
-    if allow_strings and isinstance(value, str):
-        text = value.strip()
-        return 0 < len(text) <= 64 and len(normalize(text)) <= 64
-    return False
-
-
-def component_for(unit: SemanticUnit, *, allow_string_constants: bool = False) -> dict[str, Any]:
-    component: dict[str, Any] = {
-        "canonical": unit.canonical,
-        "path": _path_shape(unit.path),
-        "has_literal": unit.has_literal,
-    }
-    if unit.has_literal:
-        if _constant_literal(unit.literal, allow_strings=allow_string_constants):
-            component["literal_mode"] = "constant"
-            component["literal"] = unit.literal
-        else:
-            component["literal_mode"] = "slot"
-            component["literal_type"] = _literal_type(unit.literal)
-    else:
-        component["literal_mode"] = "none"
-    return component
-
-
-def composition_for(units: Iterable[SemanticUnit], *, allow_string_constants: bool = False) -> list[dict[str, Any]]:
-    return [component_for(unit, allow_string_constants=allow_string_constants) for unit in units]
-
-
-def pattern_signature(composition: list[dict[str, Any]]) -> str:
-    raw = json.dumps(composition, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-    return hashlib.sha256(raw).hexdigest()
-
-
-def canonical_label(composition: list[dict[str, Any]]) -> str:
-    parts: list[str] = []
-    for item in composition:
-        canonical = str(item["canonical"])
-        mode = item.get("literal_mode")
-        if mode == "constant":
-            parts.append(f"{canonical}={item.get('literal')!s}")
-        elif mode == "slot":
-            parts.append(f"{canonical}=<{item.get('literal_type', 'value')}>")
-        else:
-            parts.append(canonical)
-    return " + ".join(parts)
-
-
-def estimated_savings(composition: list[dict[str, Any]]) -> int:
-    baseline = len(json.dumps(composition, separators=(",", ":"), ensure_ascii=False).encode())
-    slots = sum(1 for item in composition if item.get("literal_mode") == "slot")
-    estimated_pattern_wire = 18 + slots * 8
-    return max(0, baseline - estimated_pattern_wire)
-
-
-def slot_fingerprint(units: Iterable[SemanticUnit], composition: list[dict[str, Any]]) -> str | None:
-    values = [
-        unit.literal
-        for unit, component in zip(units, composition, strict=True)
-        if component.get("literal_mode") == "slot"
-    ]
-    if not values:
-        return None
-    raw = json.dumps(values, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str).encode()
-    return hashlib.sha256(raw).hexdigest()[:24]
+from .pattern_structure import _literal_type, _path_shape, canonical_label, composition_for, estimated_savings, pattern_signature, slot_fingerprint
 
 
 class PatternStore:
@@ -127,6 +45,8 @@ class PatternStore:
         self.settings = settings
         self.codebook = codebook or Codebook(db, settings)
         self.calibration = CalibrationStore(db, settings.calibration_buckets, settings.calibration_min_samples)
+        self.reliability = ReliabilityMonitor(db, settings)
+        self.quotas = QuotaManager(db, settings)
 
     def _candidate_windows(self, units: list[SemanticUnit]) -> list[list[SemanticUnit]]:
         if len(units) < self.settings.pattern_min_components:
@@ -148,6 +68,7 @@ class PatternStore:
         source_ids: list[str] | None = None,
         trust_score: float = 0.5,
         trust_scope: str | None = None,
+        workspace: str = "default",
     ) -> list[LearnedPattern]:
         if not self.settings.pattern_learning_enabled:
             return []
@@ -169,12 +90,13 @@ class PatternStore:
                 source_ids=source_ids,
                 trust_score=trust_score,
                 trust_scope=trust_scope,
+                workspace=workspace,
             )
             if item is not None:
                 promoted.append(item)
         if self.settings.pattern_recursive_learning_enabled:
             recursive = self._observe_recursive(
-                codebook, units, source_ids=source_ids, trust_score=trust_score, trust_scope=trust_scope
+                codebook, units, source_ids=source_ids, trust_score=trust_score, trust_scope=trust_scope, workspace=workspace
             )
             if recursive is not None:
                 promoted.append(recursive)
@@ -188,6 +110,7 @@ class PatternStore:
         source_ids: list[str] | None = None,
         trust_score: float = 0.5,
         trust_scope: str | None = None,
+        workspace: str = "default",
     ) -> LearnedPattern | None:
         matches = self.active_matches(codebook, units)
         if len(matches) < 2:
@@ -208,6 +131,7 @@ class PatternStore:
                 source_ids=source_ids,
                 trust_score=trust_score,
                 trust_scope=trust_scope,
+                workspace=workspace,
             )
         return None
 
@@ -313,21 +237,7 @@ class PatternStore:
         return len(rows), dominant, weighted_trust
 
     def _trust_ready(self, diversity: int, dominant_share: float, trust_score: float, scope: str = "session") -> bool:
-        if not self.settings.pattern_trust_required:
-            return True
-        scope_minimums = {
-            "session": self.settings.pattern_session_min_sources,
-            "project": self.settings.pattern_project_min_sources,
-            "workspace": self.settings.pattern_workspace_min_sources,
-            "domain": self.settings.pattern_domain_min_sources,
-            "federation": self.settings.pattern_federation_min_sources,
-        }
-        minimum_sources = max(self.settings.pattern_min_source_diversity, scope_minimums.get(scope, scope_minimums["session"]))
-        return (
-            diversity >= minimum_sources
-            and dominant_share <= self.settings.pattern_max_source_share
-            and trust_score >= self.settings.pattern_min_trust_score
-        )
+        return trust_ready(self.settings, diversity, dominant_share, trust_score, scope)
 
     def observe(
         self,
@@ -340,9 +250,11 @@ class PatternStore:
         source_ids: list[str] | None = None,
         trust_score: float = 0.5,
         trust_scope: str | None = None,
+        workspace: str = "default",
     ) -> LearnedPattern | None:
         if len(composition) < self.settings.pattern_min_components:
             return None
+        self.quotas.consume(workspace, "pattern_observation", 1)
         signature = signature_override or pattern_signature(composition)
         scope = trust_scope or self.settings.pattern_default_trust_scope
         diversity, dominant_share, weighted_trust = self._record_source_evidence(
@@ -475,6 +387,8 @@ class PatternStore:
         candidate.trust_score = weighted_trust
 
         candidate_score = math.log1p(candidate.occurrence_count) * (candidate.estimated_savings_bytes / 64.0) * max(0.05, 1.0 - candidate.semantic_variance)
+        if self.settings.learning_mode != "managed":
+            return None
         if (
             candidate.occurrence_count >= self.settings.pattern_candidate_min_count
             and candidate.estimated_savings_bytes >= self.settings.pattern_min_savings_bytes
@@ -483,6 +397,23 @@ class PatternStore:
         ):
             return self._promote_candidate(candidate)
         return None
+
+    def promote_ready_candidates(self, *, codebook: str | None = None, limit: int = 100) -> list[LearnedPattern]:
+        stmt = select(PatternCandidate).order_by(PatternCandidate.occurrence_count.desc(), PatternCandidate.estimated_savings_bytes.desc()).limit(max(1, min(limit, 1000)))
+        if codebook is not None:
+            stmt = stmt.where(PatternCandidate.codebook == codebook)
+        promoted: list[LearnedPattern] = []
+        for candidate in self.db.scalars(stmt.with_for_update(skip_locked=True)):
+            score = math.log1p(candidate.occurrence_count) * (candidate.estimated_savings_bytes / 64.0) * max(0.05, 1.0 - candidate.semantic_variance)
+            if (
+                candidate.occurrence_count >= self.settings.pattern_candidate_min_count
+                and candidate.estimated_savings_bytes >= self.settings.pattern_min_savings_bytes
+                and score >= self.settings.pattern_utility_min_score
+                and self._trust_ready(candidate.source_diversity, candidate.dominant_source_share, candidate.trust_score, candidate.trust_scope)
+            ):
+                promoted.append(self._promote_candidate(candidate))
+        self.db.flush()
+        return promoted
 
     def _promote_candidate(self, candidate: PatternCandidate) -> LearnedPattern:
         existing = self.db.scalar(
@@ -650,12 +581,7 @@ class PatternStore:
         return self.matches(codebook, units, statuses={"shadow", "validated"})
 
     def utility_score(self, pattern: LearnedPattern) -> float:
-        task = pattern.task_utility if pattern.task_utility is not None else 0.5
-        stability = max(0.0, 1.0 - pattern.semantic_variance)
-        frequency = math.log1p(max(0, pattern.occurrence_count))
-        savings = max(0.0, pattern.estimated_savings_bytes / 64.0)
-        score = frequency * savings * max(0.05, task) * stability * max(0.05, pattern.interoperability_score)
-        score /= 1.0 + max(0.0, pattern.ambiguity_score)
+        score = calculate_utility_score(pattern)
         pattern.utility_score = score
         return score
 
@@ -687,6 +613,7 @@ class PatternStore:
     def record_counterfactual(
         self, pattern_id: str, *, full_success: float, compressed_success: float, semantic_fidelity: float,
         receiver: str = "*", model: str = "*", task_family: str = "*", workspace: str = "default",
+        validation_id: str = "",
     ) -> LearnedPattern:
         pattern = self.get(pattern_id)
         if pattern is None:
@@ -712,6 +639,11 @@ class PatternStore:
             model=model,
             task_family=task_family,
         )
+        self.reliability.record_holdout(
+            pattern=pattern, workspace=workspace, receiver=receiver, model_identity_hash=model,
+            task_family=task_family, full_success=full_success, compressed_success=compressed_success, fidelity=semantic_fidelity,
+            source_id=validation_id,
+        )
         report = self.calibration.report(
             semantic_fidelity, workspace=workspace, receiver=receiver, model=model, task_family=task_family
         )
@@ -730,6 +662,9 @@ class PatternStore:
                 and compressed_avg + 1e-9 >= full_avg
                 and self._trust_ready(pattern.source_diversity, pattern.dominant_source_share, pattern.trust_score, pattern.trust_scope)
                 and report.expected_calibration_error <= self.settings.calibration_max_ece
+                and self.reliability.holdout_ready(
+                    pattern, workspace=workspace, receiver=receiver, model_identity_hash=model, task_family=task_family
+                )
             ):
                 pattern.status = "active" if self.settings.pattern_auto_activate else "validated"
                 pattern.version += 1

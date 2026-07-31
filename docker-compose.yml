@@ -13,6 +13,22 @@ services:
       timeout: 3s
       retries: 10
 
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      SAGE_ENV: production
+      SAGE_DATABASE_URL: ${SAGE_DATABASE_URL:?SAGE_DATABASE_URL is required}
+      SAGE_API_KEYS: ${SAGE_API_KEYS:?SAGE_API_KEYS is required}
+      SAGE_ALLOWED_HOSTS: ${SAGE_ALLOWED_HOSTS:?SAGE_ALLOWED_HOSTS is required}
+      SAGE_AUTH_REQUIRED: "true"
+      SAGE_AUTO_CREATE_SCHEMA: "false"
+      SAGE_DOCS_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   sage:
     build: .
     environment:
@@ -27,8 +43,8 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777

@@ -84,19 +84,57 @@ def main() -> None:
     implementations = load_json("tck/implementations.json")
     require(implementations["suite"] == "sage-tck/0.2", "TCK implementation matrix drift")
     require(load_json("src/sage_plugin/tck/implementations.json") == implementations, "packaged TCK implementation matrix drift")
-    require({item["id"] for item in implementations["implementations"]} == {"python", "javascript"}, "TCK implementation matrix incomplete")
+    require({item["id"] for item in implementations["implementations"]} == {"python", "javascript", "go"}, "TCK implementation matrix incomplete")
 
     required = [
         "scripts/conformance_matrix.py",
+        "scripts/differential_fuzz.py",
+        "scripts/architecture_check.py",
+        "scripts/cluster_chaos.py",
+        "scripts/soak_cluster.py",
+        "scripts/model_matrix_benchmark.py",
+        "scripts/invariant_check.py",
+        "scripts/generate_protocol_artifacts.py",
+        "scripts/generate_specs.py",
+        "scripts/package_check.py",
+        "integrations/go/conformance.go",
+        "integrations/openclaw/dist/index.js",
+        "integrations/openclaw/dist/conformance.js",
+        "integrations/openclaw/tck/core.json",
+        "integrations/openclaw/package.json",
+        "integrations/openclaw/openclaw.plugin.json",
+        "deploy/staging/compose.yml",
+        ".github/workflows/scale.yml",
+        "deploy/staging/nginx.conf",
+        "src/sage_plugin/corpus.py",
+        "src/sage_plugin/api_transport.py",
+        "src/sage_plugin/api_memory.py",
+        "src/sage_plugin/api_learning.py",
+        "src/sage_plugin/api_semantic.py",
+        "src/sage_plugin/api_helpers.py",
+        "src/sage_plugin/pattern_structure.py",
+        "src/sage_plugin/telemetry.py",
+        "src/sage_plugin/information_flow.py",
+        "src/sage_plugin/reachability.py",
+        "src/sage_plugin/qualification.py",
+        "src/sage_plugin/inspector_ui.py",
+        "src/sage_plugin/pattern_policy.py",
+        "src/sage_plugin/reliability.py",
+        "src/sage_plugin/merkle.py",
+        "src/sage_plugin/codebook_releases.py",
+        "spec/invariants.json",
+        "spec/generated/manifest.json",
         "docs/THREAT_MODEL.md",
+        "docs/ARCHITECTURE.md",
+        "docs/INVARIANTS.md",
         "spec/SAGE-0.2.md",
         "spec/sage-v0.2.proto",
         "spec/schemas/wire-v2.schema.json",
         "spec/schemas/pattern-v0.2.schema.json",
         "src/sage_plugin/spec/SAGE-0.2.md",
         "src/sage_plugin/spec/sage-v0.2.proto",
-        "src/sage_plugin/spec/wire-v2.schema.json",
-        "src/sage_plugin/spec/pattern-v0.2.schema.json",
+        "src/sage_plugin/spec/schemas/wire-v2.schema.json",
+        "src/sage_plugin/spec/schemas/pattern-v0.2.schema.json",
     ]
     for rel in required:
         require((ROOT / rel).is_file(), f"missing required v0.2 artifact: {rel}")
@@ -107,7 +145,7 @@ def main() -> None:
     repo_schemas = sorted((ROOT / "spec/schemas").glob("*.json"))
     require(repo_schemas, "no normative schemas found")
     for schema_path in repo_schemas:
-        packaged = ROOT / "src/sage_plugin/spec" / schema_path.name
+        packaged = ROOT / "src/sage_plugin/spec/schemas" / schema_path.name
         require(packaged.is_file(), f"missing packaged schema: {schema_path.name}")
         require(schema_path.read_bytes() == packaged.read_bytes(), f"packaged schema drift: {schema_path.name}")
 
@@ -116,6 +154,25 @@ def main() -> None:
     require("z" in wire_schema.get("properties", {}), "wire trace field missing from schema")
     require("e" in wire_schema.get("$defs", {}).get("WireAtomV2", {}).get("properties", {}), "wire epistemic field missing from schema")
     require("signature" in load_json("spec/schemas/packet-v0.2.schema.json").get("properties", {}), "readable packet signature missing from schema")
+
+
+    generated = load_json("spec/generated/manifest.json")
+    require(generated["protocol"] == EXPECTED_PROTOCOL, "generated protocol manifest drift")
+    require(generated["wire"] == EXPECTED_WIRE, "generated wire manifest drift")
+    require(set(generated.get("artifacts", {})) >= {
+        "spec/generated/wire-v2.ts",
+        "spec/generated/wire-v2.go",
+        "spec/generated/WIRE-FIELDS.md",
+        "spec/sage-v0.2.proto",
+        "src/sage_plugin/spec/sage-v0.2.proto",
+    }, "generated protocol artifact manifest incomplete")
+
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    require("alembic upgrade head &&" not in dockerfile, "application container must not race schema migrations")
+    root_compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    staging_compose = (ROOT / "deploy/staging/compose.yml").read_text(encoding="utf-8")
+    require('command: ["alembic", "upgrade", "head"]' in root_compose, "root Compose migration service missing")
+    require('command: ["alembic", "upgrade", "head"]' in staging_compose, "staging migration service missing")
 
     migration_files = sorted(path.name for path in (ROOT / "alembic/versions").glob("*.py") if path.name != "__init__.py")
     require(migration_files == ["0001_sage_0_2_baseline.py"], f"unexpected migration history: {migration_files}")

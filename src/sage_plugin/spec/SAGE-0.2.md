@@ -53,9 +53,9 @@ Canonical encoding exists for hashing, signatures, test vectors, caches, and cro
 2. Object keys are recursively sorted lexicographically by Unicode code point.
 3. Arrays retain order.
 4. NaN and infinities are forbidden.
-5. Canonical JSON is UTF-8, unescaped Unicode where JSON permits it, no insignificant whitespace, and no NaN/Infinity.
+5. Canonical JSON is UTF-8, unescaped Unicode where JSON permits it, no insignificant whitespace, and no NaN/Infinity. Canonical JSON is a normalized readable representation, not the cross-runtime identity primitive for floating-point text.
 6. Canonical MessagePack uses the same recursively sorted structure, `bin` for bytes, UTF-8 strings, and 64-bit floats.
-7. A canonical SAGE digest is `sha256:` followed by the SHA-256 hex digest of canonical MessagePack bytes.
+7. A canonical SAGE digest is `sha256:` followed by the SHA-256 hex digest of canonical MessagePack bytes. Canonical MessagePack bytes and this digest are the cross-runtime protocol identity.
 
 The Python reference functions are `canonical_json_bytes`, `canonical_msgpack_bytes`, and `canonical_digest` in `sage_plugin.protocol_spec`.
 
@@ -103,7 +103,7 @@ A2A 1.0 owns peer-agent discovery, task lifecycle, streaming, cancellation, and 
 {
   "data": {
     "sageProtocol": "sage/0.2",
-    "wire": {"v": 1, "c": "global", "a": "handoff", "p": {}}
+    "wire": {"v": 2, "c": "global", "a": "handoff", "p": {}}
   },
   "mediaType": "application/vnd.sage.packet+json"
 }
@@ -121,4 +121,4 @@ The SAGE durable bus is at-least-once. Consumers MUST use `message_id`/correlati
 
 ## Conformance
 
-An implementation claiming `sage/0.2` conformance MUST pass the TCK vectors in `tck/vectors/core.json`, including canonical JSON, canonical MessagePack, digest, schema rejection, and A2A DataPart round-trip tests. The reference conformance command may additionally run deterministic malformed-wire mutations; those are supplemental hardening checks and do not change the frozen vector set.
+An implementation claiming `sage/0.2` conformance MUST pass the TCK vectors in `tck/vectors/core.json`, including canonical MessagePack, digest identity, structural JSON validation, schema rejection, and A2A DataPart round-trip tests. The reference conformance command may additionally run deterministic malformed-wire mutations; those are supplemental hardening checks and do not change the frozen vector set.

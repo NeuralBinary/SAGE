@@ -1,0 +1,63 @@
+name: scale-qualification
+on:
+  workflow_dispatch:
+    inputs:
+      vocabulary:
+        description: Comma-separated concept counts
+        required: true
+        default: "1000,10000,100000,1000000"
+      soak_seconds:
+        description: Staging soak duration in seconds
+        required: true
+        default: "3600"
+
+jobs:
+  vocabulary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: python -m pip install -e '.[dev]'
+      - run: sage-qualify --vocabulary "${{ inputs.vocabulary }}"
+      - run: sage-qualify --profile-encode --profile-iterations 100 --max-query-count 40
+
+  staging-soak:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: |
+          mkdir -p .ci-tls
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -keyout .ci-tls/server.key -out .ci-tls/server.crt \
+            -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost"
+      - run: |
+          echo "SAGE_POSTGRES_PASSWORD=scale-postgres-password" >> "$GITHUB_ENV"
+          echo "SAGE_API_KEYS=scale-service-key-0123456789abcdef" >> "$GITHUB_ENV"
+          echo "SAGE_ALLOWED_HOSTS=localhost,127.0.0.1,sage-a,sage-b,sage-c" >> "$GITHUB_ENV"
+          echo "SAGE_TLS_CERT=${GITHUB_WORKSPACE}/.ci-tls/server.crt" >> "$GITHUB_ENV"
+          echo "SAGE_TLS_KEY=${GITHUB_WORKSPACE}/.ci-tls/server.key" >> "$GITHUB_ENV"
+      - run: docker compose -f deploy/staging/compose.yml up --build -d --wait
+      - run: |
+          python scripts/soak_cluster.py \
+            --url https://localhost:8443 \
+            --api-key "$SAGE_API_KEYS" \
+            --workspace scale-soak \
+            --duration-seconds "${{ inputs.soak_seconds }}" \
+            --workers 16 \
+            --rate 20 \
+            --ca-cert .ci-tls/server.crt
+      - run: |
+          python scripts/cluster_chaos.py \
+            --url https://localhost:8443 \
+            --api-key "$SAGE_API_KEYS" \
+            --workspace scale-chaos \
+            --compose-file deploy/staging/compose.yml \
+            --ca-cert .ci-tls/server.crt \
+            --disrupt-postgres
+      - if: always()
+        run: docker compose -f deploy/staging/compose.yml down -v --remove-orphans

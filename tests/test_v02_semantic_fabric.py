@@ -63,6 +63,9 @@ def pattern_settings(**overrides) -> Settings:
         pattern_shadow_min_samples=1,
         pattern_shadow_min_success=0.9,
         pattern_auto_activate=True,
+        pattern_holdout_min_samples=1,
+        pattern_holdout_min_sources=1,
+        pattern_holdout_min_fidelity=0.9,
         pattern_utility_min_score=0.0,
         semantic_cache_enabled=False,
         pattern_min_source_diversity=1,
@@ -226,6 +229,7 @@ def test_counterfactual_receiver_fidelity_controls_pattern_use_and_gc():
             semantic_fidelity=1.0,
             receiver="good",
             model="model-good",
+            validation_id="good-holdout",
         )
         assert pattern.status == "active"
         good = codec.encode(EncodeRequest(content=content, receiver="good", receiver_model="model-good", use_cache=False))
@@ -238,6 +242,7 @@ def test_counterfactual_receiver_fidelity_controls_pattern_use_and_gc():
             semantic_fidelity=0.2,
             receiver="bad",
             model="model-bad",
+            validation_id="bad-holdout",
         )
         bad = codec.encode(EncodeRequest(content=content, receiver="bad", receiver_model="model-bad", use_cache=False))
         assert len(bad.packet.atoms) == 2

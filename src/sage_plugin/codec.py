@@ -15,13 +15,15 @@ from .config import Settings
 from .db_models import Concept, MessageAudit
 from .knowledge import KnowledgeStore
 from .references import ReferenceAccessError, ReferenceExpiredError, ReferenceStore, canonical_bytes
-from .protocol_spec import SAGE_WIRE_VERSION, canonical_json_bytes, canonical_msgpack_bytes, validate_wire_v2
+from .reliability import ModelIdentityStore
+from .protocol_spec import canonical_json_bytes, canonical_msgpack_bytes
 from .patterns import PatternStore
 from .semantic_safety import assess_unit
-from .signing import sign_wire, verify_wire
+from .signing import sign_wire
 from .schemas import Atom, DecodeResponse, EncodeRequest, EncodeResponse, FallbackMode, Packet, Provenance
 from .state import StateStore, apply_patch, diff
 from .telemetry import Telemetry
+from .wire_codec import WireCodec
 
 
 class SageCodec:
@@ -31,10 +33,11 @@ class SageCodec:
         self.codebook = Codebook(db, settings)
         self.patterns = PatternStore(db, settings, self.codebook)
         self.refs = ReferenceStore(db, settings)
-        self.states = StateStore(db)
+        self.states = StateStore(db, settings)
         self.knowledge = KnowledgeStore(db)
         self.cache = CacheStore(db, settings.semantic_cache_ttl_seconds)
         self.telemetry = Telemetry(settings)
+        self.wire_codec = WireCodec(settings)
 
     def _budget_bytes(self, request: EncodeRequest) -> tuple[int, int | None]:
         token_budget = request.budget.max_tokens if request.budget and request.budget.max_tokens else self.settings.default_token_budget
@@ -51,102 +54,17 @@ class SageCodec:
             return prov
         return Provenance(producer=request.sender, derivation="direct")
 
-    def _compact_payload(self, packet: Packet) -> dict[str, Any]:
-        """Stable compact wire form. The API model remains readable; the wire does not pay for verbose keys."""
-        payload: dict[str, Any] = {"v": SAGE_WIRE_VERSION, "c": packet.cb, "a": packet.act}
-        if packet.id:
-            payload["i"] = packet.id
-        if packet.sender:
-            payload["s"] = packet.sender
-        if packet.receiver:
-            payload["r"] = packet.receiver
-        if packet.atoms:
-            payload["x"] = [
-                {k: v for k, v in {"c": a.code, "v": a.cv, "l": a.literal if a.literal is not None else None, "h": 1 if a.has_literal else None, "p": a.path, "q": a.confidence if a.confidence != 1.0 else None, "e": a.epistemic_type if a.epistemic_type != "fact" else None}.items() if v is not None}
-                for a in packet.atoms
-            ]
-        if packet.refs:
-            payload["R"] = packet.refs
-        if packet.base:
-            payload["b"] = packet.base
-        if packet.delta is not None:
-            payload["d"] = packet.delta
-        prov = packet.prov
-        try:
-            observed = int(datetime.fromisoformat(prov.observed_at).timestamp())
-        except ValueError:
-            observed = prov.observed_at
-        p = {k: v for k, v in {"s": prov.source_ids or None, "t": observed, "q": prov.confidence if prov.confidence != 1.0 else None, "d": prov.derivation if prov.derivation != "direct" else None, "p": prov.producer}.items() if v is not None}
-        payload["p"] = p
-        meta = {k: v for k, v in packet.meta.items() if k in {"state", "revision", "budget_exceeded", "memory_tier"}}
-        if meta:
-            payload["m"] = meta
-        if packet.signature:
-            payload["g"] = packet.signature
-        if packet.trace is not None:
-            payload["z"] = {k: v for k, v in {"p": packet.trace.traceparent, "s": packet.trace.tracestate}.items() if v is not None}
-        return payload
-
     def _wire(self, packet: Packet) -> tuple[str, bytes]:
-        compact = self._compact_payload(packet)
-        return (
-            canonical_json_bytes(compact).decode("utf-8"),
-            canonical_msgpack_bytes(compact),
-        )
+        return self.wire_codec.wire(packet)
 
     def _packet_id(self) -> str:
         return "P" + uuid.uuid4().hex
 
     def compact(self, packet: Packet) -> dict[str, Any]:
-        return self._compact_payload(packet)
+        return self.wire_codec.compact(packet)
 
     def expand(self, payload: dict[str, Any]) -> Packet:
-        validate_wire_v2(payload)
-        if self.settings.require_packet_signatures and "g" not in payload:
-            raise ValueError("packet signature required")
-        if "g" in payload and self.settings.packet_signing_public_key is not None:
-            if not verify_wire(payload, self.settings.packet_signing_public_key.get_secret_value()):
-                raise ValueError("invalid packet signature")
-        prov_raw = payload.get("p", {}) or {}
-        observed = prov_raw.get("t")
-        if isinstance(observed, (int, float)):
-            observed_at = datetime.fromtimestamp(observed, timezone.utc).isoformat()
-        else:
-            observed_at = str(observed) if observed else Provenance().observed_at
-        prov = Provenance(
-            source_ids=list(prov_raw.get("s") or []),
-            observed_at=observed_at,
-            confidence=float(prov_raw.get("q", 1.0)),
-            derivation=str(prov_raw.get("d", "direct")),
-            producer=prov_raw.get("p"),
-        )
-        atoms = [
-            Atom(
-                code=a.get("c"),
-                cv=a.get("v"),
-                literal=a.get("l"),
-                has_literal=bool(a.get("h", "l" in a)),
-                path=a.get("p"),
-                confidence=float(a.get("q", 1.0)),
-                epistemic_type=str(a.get("e", "fact")),
-            )
-            for a in payload.get("x", [])
-        ]
-        return Packet(
-            id=payload.get("i"),
-            cb=str(payload.get("c", self.settings.codebook)),
-            sender=payload.get("s"),
-            receiver=payload.get("r"),
-            act=str(payload.get("a", "report")),
-            atoms=atoms,
-            refs=list(payload.get("R", [])),
-            base=payload.get("b"),
-            delta=payload.get("d"),
-            prov=prov,
-            meta=dict(payload.get("m", {})),
-            signature=dict(payload.get("g", {})) if payload.get("g") else None,
-            trace={"traceparent": payload["z"]["p"], "tracestate": payload["z"].get("s")} if payload.get("z") else None,
-        )
+        return self.wire_codec.expand(payload)
 
     def _semantic_packet(self, request: EncodeRequest, codebook_name: str, provenance: Provenance, decisions: list[dict[str, Any]], *, allow_patterns: bool = True) -> Packet:
         packet = Packet(
@@ -162,13 +80,18 @@ class SageCodec:
 
         if request.auto_learn and request.record_learning:
             sources = [request.sender] if request.sender else []
-            promoted = self.patterns.observe_units(
-                codebook_name,
-                bounded_units,
-                source_ids=sources,
-                trust_score=request.source_trust,
-                trust_scope=request.learning_scope,
-            )
+            try:
+                promoted = self.patterns.observe_units(
+                    codebook_name,
+                    bounded_units,
+                    source_ids=sources,
+                    trust_score=request.source_trust,
+                    trust_scope=request.learning_scope,
+                    workspace=request.workspace,
+                )
+            except Exception as exc:
+                promoted = []
+                decisions.append({"action": "optional_subsystem_fallback", "subsystem": "pattern_learning", "error": type(exc).__name__})
             for pattern in promoted:
                 decisions.append({
                     "action": "pattern_promoted_to_shadow",
@@ -178,7 +101,12 @@ class SageCodec:
                 })
 
         seen_shadow: set[str] = set()
-        for match in self.patterns.shadow_matches(codebook_name, bounded_units):
+        try:
+            shadow_matches = self.patterns.shadow_matches(codebook_name, bounded_units)
+        except Exception as exc:
+            shadow_matches = []
+            decisions.append({"action": "optional_subsystem_fallback", "subsystem": "pattern_shadow", "error": type(exc).__name__})
+        for match in shadow_matches:
             if match.pattern.pattern_id in seen_shadow:
                 continue
             seen_shadow.add(match.pattern.pattern_id)
@@ -190,29 +118,43 @@ class SageCodec:
                 "estimated_savings_bytes": match.pattern.estimated_savings_bytes,
             })
 
+        try:
+            available_active = self.patterns.active_matches(codebook_name, bounded_units, receiver=request.receiver, model=request.receiver_model, workspace=request.workspace, task_family=request.task_family)
+        except Exception as exc:
+            available_active = []
+            decisions.append({"action": "optional_subsystem_fallback", "subsystem": "pattern_matching", "error": type(exc).__name__})
         if allow_patterns:
-            active = {match.start: match for match in self.patterns.active_matches(codebook_name, bounded_units, receiver=request.receiver, model=request.receiver_model, workspace=request.workspace, task_family=request.task_family)}
+            active = {match.start: match for match in available_active}
         else:
             active = {}
-            if self.patterns.active_matches(codebook_name, bounded_units, receiver=request.receiver, model=request.receiver_model, workspace=request.workspace, task_family=request.task_family):
+            if available_active:
                 decisions.append({"action": "patterns_disabled_receiver", "reason": "receiver_capability"})
 
         def append_unit(unit: Any) -> None:
             risk = assess_unit(unit)
-            match = self.codebook.match(codebook_name, unit.canonical, observe=request.record_learning)
-            concept = match.concept
+            try:
+                match = self.codebook.match(codebook_name, unit.canonical, observe=request.record_learning)
+                concept = match.concept
+            except Exception as exc:
+                match = None
+                concept = None
+                decisions.append({"action": "optional_subsystem_fallback", "subsystem": "semantic_match", "error": type(exc).__name__, "path": unit.path})
             if concept is None and request.auto_learn:
-                concept = self.codebook.observe_candidate(codebook_name, unit.canonical)
+                try:
+                    concept = self.codebook.observe_candidate(codebook_name, unit.canonical)
+                except Exception as exc:
+                    concept = None
+                    decisions.append({"action": "optional_subsystem_fallback", "subsystem": "concept_learning", "error": type(exc).__name__, "path": unit.path})
             if concept:
-                score = max(match.similarity, concept.confidence)
-                if self.settings.semantic_firewall_enabled and risk.critical and match.similarity < self.settings.critical_semantic_threshold:
+                score = max(match.similarity if match is not None else 0.0, concept.confidence)
+                if self.settings.semantic_firewall_enabled and risk.critical and (match.similarity if match is not None else 0.0) < self.settings.critical_semantic_threshold:
                     decisions.append({"action": "semantic_firewall", "path": unit.path, "risk": risk.score, "reasons": list(risk.reasons), "decision": "preserve_literal"})
                     packet.atoms.append(Atom(literal=unit.literal if unit.has_literal else (unit.surface or unit.canonical.replace("_", " ")), has_literal=True, path=unit.path, epistemic_type=risk.epistemic_type))
                     return
                 preserve_surface = (
                     not unit.has_literal
                     and unit.surface is not None
-                    and match.similarity < self.settings.semantic_lossless_threshold
+                    and (match.similarity if match is not None else 0.0) < self.settings.semantic_lossless_threshold
                 )
                 decisions.append({
                     "action": "semantic_code",
@@ -265,7 +207,10 @@ class SageCodec:
                         "bindings": len(bindings),
                         "estimated_savings_bytes": pattern.estimated_savings_bytes,
                     })
-                    self.patterns.mark_used(pattern)
+                    try:
+                        self.patterns.mark_used(pattern)
+                    except Exception as exc:
+                        decisions.append({"action": "optional_subsystem_fallback", "subsystem": "pattern_usage", "error": type(exc).__name__})
                     packet.atoms.append(
                         Atom(
                             code=concept.code,
@@ -359,6 +304,10 @@ class SageCodec:
 
     def encode(self, request: EncodeRequest) -> EncodeResponse:
         codebook_name = request.codebook or self.settings.codebook
+        if request.receiver and not request.receiver_model:
+            identity = ModelIdentityStore(self.db).active(request.workspace, request.receiver)
+            if identity is not None:
+                request.receiver_model = identity.identity_hash
         input_raw = canonical_bytes(request.content)
         if len(input_raw) > self.settings.max_input_bytes:
             raise ValueError(f"payload exceeds max_input_bytes={self.settings.max_input_bytes}")
@@ -410,7 +359,11 @@ class SageCodec:
         strategy = "semantic"
         packet: Packet | None = None
         if self.settings.semantic_cache_enabled and request.use_cache:
-            cached = self.cache.get(key, cb_fingerprint)
+            try:
+                cached = self.cache.get(key, cb_fingerprint)
+            except Exception as exc:
+                cached = None
+                decisions.append({"action": "optional_subsystem_fallback", "subsystem": "semantic_cache_read", "error": type(exc).__name__})
             if cached is not None:
                 candidate = Packet.model_validate(cached.packet)
                 cache_valid = True
@@ -472,14 +425,17 @@ class SageCodec:
             if self.settings.semantic_cache_enabled and request.use_cache and cacheable:
                 cache_packet = packet.model_dump(exclude_none=True)
                 cache_packet.pop("id", None)
-                self.cache.put(key, cache_packet, decisions, cb_fingerprint)
+                try:
+                    self.cache.put(key, cache_packet, decisions, cb_fingerprint)
+                except Exception as exc:
+                    decisions.append({"action": "optional_subsystem_fallback", "subsystem": "semantic_cache_write", "error": type(exc).__name__})
 
         packet.id = self._packet_id()
         packet.meta.setdefault("strategy", strategy)
         packet.meta.setdefault("codebook_fingerprint", cb_fingerprint)
         packet.meta.setdefault("receiver_known_code_count", len(known_codes))
         if self.settings.packet_signing_private_key is not None:
-            unsigned = self._compact_payload(packet)
+            unsigned = self.wire_codec.compact(packet)
             unsigned.pop("g", None)
             packet.signature = sign_wire(unsigned, self.settings.packet_signing_private_key.get_secret_value(), key_id=self.settings.packet_signing_key_id)
             decisions.append({"action": "packet_signed", "key_id": self.settings.packet_signing_key_id})
@@ -532,6 +488,8 @@ class SageCodec:
             packet_bytes=out_msgpack,
             semantic_loss_score=semantic_loss,
             receiver_known_ratio=known_ratio,
+            traceparent=request.trace.traceparent if request.trace else None,
+            tracestate=request.trace.tracestate if request.trace else None,
         ):
             self.telemetry.add("packet.bytes", out_msgpack, strategy=strategy)
             self.telemetry.add("original.tokens", audit.original_token_estimate, strategy=strategy)

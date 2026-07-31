@@ -19,7 +19,7 @@ The readable model is `Packet(v="sage/0.2", ...)`. All v0.2 writers and readers 
 
 A packet can carry semantic atoms, refs, base state + JSON Patch delta, provenance, and small protocol metadata. Unknown or ambiguous concepts stay recoverable through literals or references.
 
-Canonical JSON/MessagePack and `sha256(canonical-msgpack)` are defined by the frozen spec and TCK. Unknown wire-v2 fields are rejected so optional-field drift cannot silently fork implementations.
+Canonical MessagePack and `sha256(canonical-msgpack)` define protocol identity. Canonical JSON is a normalized readable representation; conforming runtimes must preserve its parsed structure, while floating-point text formatting is not an identity primitive. Unknown wire-v2 fields are rejected so optional-field drift cannot silently fork implementations.
 
 ## Receiver model
 
@@ -61,4 +61,4 @@ Trace context is excluded from authorization decisions and is preserved through 
 
 ## Cross-runtime conformance
 
-The TCK is normative for canonical JSON, canonical MessagePack, digest identity, validation failure, trace context, signature shape, and A2A wrapping. Python and JavaScript runners consume the same vector file. Release CI requires both runners to pass so canonical behavior is not proven only by one implementation.
+The TCK is normative for canonical MessagePack, digest identity, structural JSON equivalence, validation failure, trace context, signature shape, and A2A wrapping. Python, JavaScript, and Go runners consume the same vector file. Release CI requires all three independent runners plus differential fuzzing so protocol identity is not proven by a single implementation family.

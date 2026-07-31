@@ -22,7 +22,7 @@ from .codebook import Codebook
 from .codec import SageCodec
 from .config import Settings
 from .db import Base
-from .db_models import LearnedPattern, PatternCandidate, PatternSourceEvidence
+from .db_models import BusMessage, LearnedPattern, PatternCandidate, PatternSourceEvidence
 from .schemas import EncodeRequest
 from .patterns import PatternStore, pattern_signature
 
@@ -254,6 +254,102 @@ def concurrent_pattern_learning(settings: Settings, workers: int = 6, observatio
         "promoted": bool(patterns),
     }
 
+
+def concurrent_ordering(settings: Settings, workers: int = 4, messages_per_worker: int = 10) -> dict[str, Any]:
+    with TemporaryDirectory() as temp:
+        db_path = Path(temp) / "ordering.db"
+        engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False}, pool_pre_ping=True)
+        Base.metadata.create_all(engine)
+        local_session = sessionmaker(bind=engine, expire_on_commit=False)
+
+        def producer(worker: int) -> int:
+            with local_session() as db:
+                bus = SemanticBus(db, settings)
+                for index in range(messages_per_worker):
+                    bus.handoff(
+                        receiver="ordered-receiver", sender=f"worker-{worker}",
+                        content={"worker": worker, "index": index}, ordering_key="shared-stream",
+                        idempotency_key=f"ordered-{worker}-{index}",
+                    )
+                    db.commit()
+            return messages_per_worker
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            produced = sum(pool.map(producer, range(workers)))
+        from .db_models import BusMessage
+        with local_session() as db:
+            sequence = list(db.scalars(
+                select(BusMessage.sequence_no)
+                .where(BusMessage.ordering_key == "shared-stream")
+                .order_by(BusMessage.sequence_no)
+            ))
+        engine.dispose()
+        expected = list(range(1, produced + 1))
+        if sequence != expected:
+            raise AssertionError("ordered stream sequence is not contiguous and unique")
+        return {"workers": workers, "messages": produced, "first": sequence[0], "last": sequence[-1]}
+
+def concurrent_ordering_configured(settings: Settings, workers: int = 8, messages_per_worker: int = 20) -> dict[str, Any]:
+    if workers < 1 or messages_per_worker < 1:
+        raise ValueError("workers and messages_per_worker must be positive")
+    is_sqlite = settings.database_url.startswith("sqlite")
+    engine = create_engine(
+        settings.database_url,
+        pool_pre_ping=True,
+        connect_args={"check_same_thread": False} if is_sqlite else {},
+    )
+    Base.metadata.create_all(engine)
+    local_session = sessionmaker(bind=engine, expire_on_commit=False)
+    stream = f"ordered-{uuid.uuid4().hex}"
+    receiver = f"ordered-receiver-{uuid.uuid4().hex}"
+
+    def producer(worker: int) -> int:
+        with local_session() as db:
+            bus = SemanticBus(db, settings)
+            for index in range(messages_per_worker):
+                bus.handoff(
+                    receiver=receiver,
+                    sender=f"worker-{worker}",
+                    content={"worker": worker, "index": index},
+                    ordering_key=stream,
+                    idempotency_key=f"{stream}:{worker}:{index}",
+                )
+                db.commit()
+        return messages_per_worker
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        produced = sum(pool.map(producer, range(workers)))
+    with local_session() as db:
+        sequence = list(db.scalars(
+            select(BusMessage.sequence_no)
+            .where(BusMessage.ordering_key == stream)
+            .order_by(BusMessage.sequence_no)
+        ))
+    engine.dispose()
+    expected = list(range(1, produced + 1))
+    if sequence != expected:
+        raise AssertionError("configured ordered stream sequence is not contiguous and unique")
+    return {
+        "backend": "sqlite" if is_sqlite else "configured",
+        "workers": workers,
+        "messages": produced,
+        "first": sequence[0],
+        "last": sequence[-1],
+    }
+
+
+
+def profile_encode_isolated(settings: Settings, iterations: int = 30) -> dict[str, Any]:
+    with TemporaryDirectory() as temp:
+        db_path = Path(temp) / "profile.db"
+        engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False}, pool_pre_ping=True)
+        Base.metadata.create_all(engine)
+        local_session = sessionmaker(bind=engine, expire_on_commit=False)
+        with local_session() as db:
+            report = profile_encode(db, settings, {"project": "phoenix", "status": "blocked", "failed": 3}, iterations)
+        engine.dispose()
+    return report
+
 def vocabulary_profile_isolated(settings: Settings, sizes: list[int]) -> list[dict[str, Any]]:
     from sqlalchemy.orm import sessionmaker
 
@@ -347,6 +443,11 @@ def main() -> None:
     parser.add_argument("--messages", type=int, default=20)
     parser.add_argument("--vocabulary", default="")
     parser.add_argument("--pattern-concurrency", action="store_true")
+    parser.add_argument("--ordering-concurrency", action="store_true")
+    parser.add_argument("--configured-ordering", action="store_true")
+    parser.add_argument("--profile-encode", action="store_true")
+    parser.add_argument("--profile-iterations", type=int, default=30)
+    parser.add_argument("--max-query-count", type=int, default=40)
     args = parser.parse_args()
     settings = Settings(auth_required=False, auto_create_schema=True)
     report: dict[str, Any] = {}
@@ -359,6 +460,15 @@ def main() -> None:
         report["vocabulary"] = vocabulary_profile_isolated(settings, sizes)
     if args.pattern_concurrency:
         report["pattern_concurrency"] = concurrent_pattern_learning(settings, args.workers, args.messages)
+    if args.ordering_concurrency:
+        report["ordering_concurrency"] = concurrent_ordering(settings, args.workers, args.messages)
+    if args.configured_ordering:
+        report["configured_ordering"] = concurrent_ordering_configured(settings, args.workers, args.messages)
+    if args.profile_encode:
+        profile = profile_encode_isolated(settings, args.profile_iterations)
+        if profile["query_max"] > args.max_query_count:
+            raise SystemExit(f"encode query budget exceeded: {profile['query_max']} > {args.max_query_count}")
+        report["encode_profile"] = profile
     print(json.dumps(report, indent=2, sort_keys=True))
 
 

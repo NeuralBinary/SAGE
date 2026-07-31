@@ -1,0 +1,78 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: sage
+      POSTGRES_USER: sage
+      POSTGRES_PASSWORD: ${SAGE_POSTGRES_PASSWORD:?SAGE_POSTGRES_PASSWORD is required}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sage -d sage"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - sage_staging_pg:/var/lib/postgresql/data
+
+  migrate:
+    build:
+      context: ../..
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      SAGE_ENV: production
+      SAGE_DATABASE_URL: postgresql+psycopg://sage:${SAGE_POSTGRES_PASSWORD}@postgres:5432/sage
+      SAGE_API_KEYS: ${SAGE_API_KEYS:?SAGE_API_KEYS is required}
+      SAGE_ALLOWED_HOSTS: ${SAGE_ALLOWED_HOSTS:?SAGE_ALLOWED_HOSTS is required}
+      SAGE_AUTH_REQUIRED: "true"
+      SAGE_AUTO_CREATE_SCHEMA: "false"
+      SAGE_DOCS_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  sage-a: &sage
+    build:
+      context: ../..
+    environment: &sage-env
+      SAGE_ENV: production
+      SAGE_DATABASE_URL: postgresql+psycopg://sage:${SAGE_POSTGRES_PASSWORD}@postgres:5432/sage
+      SAGE_API_KEYS: ${SAGE_API_KEYS:?SAGE_API_KEYS is required}
+      SAGE_ALLOWED_HOSTS: ${SAGE_ALLOWED_HOSTS:?SAGE_ALLOWED_HOSTS is required}
+      SAGE_AUTH_REQUIRED: "true"
+      SAGE_AUTO_CREATE_SCHEMA: "false"
+      SAGE_DOCS_ENABLED: "false"
+      SAGE_METRICS_PUBLIC: "false"
+      SAGE_DB_POOL_SIZE: "20"
+      SAGE_DB_MAX_OVERFLOW: "40"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
+  sage-b:
+    <<: *sage
+    environment: *sage-env
+
+  sage-c:
+    <<: *sage
+    environment: *sage-env
+
+  gateway:
+    image: nginx:1.29-alpine
+    ports:
+      - "8443:8443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ${SAGE_TLS_CERT:?SAGE_TLS_CERT is required}:/etc/nginx/tls/tls.crt:ro
+      - ${SAGE_TLS_KEY:?SAGE_TLS_KEY is required}:/etc/nginx/tls/tls.key:ro
+    depends_on: [sage-a, sage-b, sage-c]
+    read_only: true
+    tmpfs: [/var/cache/nginx, /var/run]
+    restart: unless-stopped
+
+volumes:
+  sage_staging_pg:

@@ -26,10 +26,12 @@ SAGE v0.2 is built around these invariants:
 - Receiver knowledge advances only after acknowledgement.
 - Large content is referenced rather than repeatedly copied.
 - State updates are represented as lossless deltas when a shared base state exists.
-- Learned patterns remain compositional, inspectable, reversible, receiver-aware, and counterfactually validated.
+- Learned patterns remain compositional, inspectable, reversible, receiver-aware, trust-scoped, holdout-validated, drift-aware, and counterfactually validated.
 - SAGE semantics do not depend on MCP, A2A, a model vendor, or a hidden model state.
 - Production configuration fails closed for authentication, database selection, host policy, documentation exposure, and optional signature enforcement.
 - Protocol, package, migration, schema, adapter, and conformance metadata remain locked to v0.2 until the project version is intentionally changed.
+- Workspace and per-agent fairness, backpressure, ordering, partitioning, and idempotency protect shared infrastructure under retry storms and uneven tenants.
+- Cross-runtime protocol identity is independently checked in Python, JavaScript, and Go; canonical MessagePack plus SHA-256 is the wire identity.
 
 ## Architecture
 
@@ -170,7 +172,7 @@ Conflicting claims coexist with provenance and confidence instead of overwriting
 
 Pattern learning is persistent and compositional. Recurring semantic structures are first stored as candidates, then move through shadow validation and counterfactual evaluation before becoming active. Active patterns emit an ordinary concept code plus typed dynamic bindings. The flattened lossless composition remains available for interoperability and decoding.
 
-Pattern decisions incorporate frequency, estimated savings, semantic stability, task utility, ambiguity, interoperability, and receiver/model-specific fidelity. Low-fidelity patterns are suppressed for the affected receiver/model while remaining available where their measured fidelity is sufficient.
+Pattern decisions incorporate frequency, estimated savings, semantic stability, task utility, ambiguity, interoperability, source trust/diversity, holdout evidence, and receiver/model-specific fidelity. Receiver reliability is bound to provider/model build, runtime build/configuration, and task family. Low-fidelity or drifting patterns are suppressed for the affected receiver identity while remaining available where their measured fidelity is sufficient.
 
 Pattern namespaces are hierarchical. Cooling and retirement prevent unbounded vocabulary growth. Foreign patterns imported through federation are observed locally and must earn local trust before active use.
 
@@ -202,8 +204,14 @@ Run the conformance checks with:
 sage-tck --json
 sage-conform --fuzz 1000
 python scripts/conformance_matrix.py
+python scripts/differential_fuzz.py --iterations 1000
+python scripts/architecture_check.py
+python scripts/invariant_check.py
+python scripts/generate_protocol_artifacts.py --check
 python scripts/release_check.py
 ```
+
+Python, JavaScript, and Go independently consume the normative vectors. The protocol identity is canonical MessagePack bytes plus SHA-256. JSON remains a normalized/readable representation and is compared structurally where floating-point text can differ between language runtimes.
 
 The release checker enforces package metadata, author/credit metadata, protocol/wire identity, one baseline migration, schema parity, TCK parity, repository hygiene, and v0.2 consistency.
 
@@ -247,13 +255,15 @@ See `docs/SECURITY.md`, `docs/THREAT_MODEL.md`, and `docs/CONFIGURATION.md`.
 
 Prometheus metrics cover HTTP volume and latency. The Inspector exposes compression waterfall, semantic loss, receiver-known ratio, reference savings, pattern decisions, and replay context. Optional OpenTelemetry emits protocol measurements without placing content payloads in telemetry attributes.
 
-See `docs/OPERATIONS.md`.
+See `docs/OPERATIONS.md` and `docs/ARCHITECTURE.md`.
 
 ## Verification
 
 The repository verification process covers unit/integration behavior, semantic safety, protocol conformance, malformed-wire rejection, migrations, OpenAPI construction, packaging, adapter syntax/build checks, performance regression gates, repository consistency, and artifact re-validation.
 
-The current verification record is `VERIFICATION.md`. A generated release report is provided beside the packaged artifacts during a verified build.
+The current verification record is `VERIFICATION.md`. A generated release report is provided beside the packaged artifacts during a verified build. Production-shape qualification uses `deploy/staging/compose.yml`: PostgreSQL, one migration job, three SAGE workers, TLS load balancing, end-to-end soak traffic, worker failover, database outage/readiness failure, and durable recovery.
+
+Task-economics research uses the JSONL corpus format in `sage_plugin.corpus` and `scripts/model_matrix_benchmark.py`. Provider/model measurements must come from configured external runtimes; SAGE does not manufacture token, cost, latency, or task-success results when those runtimes are unavailable.
 
 ## Repository structure
 

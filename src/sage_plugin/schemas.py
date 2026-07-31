@@ -123,6 +123,9 @@ class HandoffRequest(BaseModel):
     ttl_seconds: int | None = Field(default=None, gt=0)
     budget_tokens: int | None = Field(default=None, gt=0)
     source_ids: list[str] = Field(default_factory=list)
+    idempotency_key: str | None = Field(default=None, max_length=128)
+    partition_key: str | None = Field(default=None, max_length=128)
+    ordering_key: str | None = Field(default=None, max_length=128)
 
 
 class BusMessageResponse(BaseModel):
@@ -133,6 +136,10 @@ class BusMessageResponse(BaseModel):
     workspace: str
     run_id: str | None = None
     correlation_id: str | None = None
+    idempotency_key: str | None = None
+    partition_key: str = "default"
+    ordering_key: str | None = None
+    sequence_no: int | None = None
     priority: int
     status: str
     wire: dict[str, JsonValue]
@@ -262,6 +269,7 @@ class StoreRequest(BaseModel):
     ttl_seconds: int | None = Field(default=None, gt=0)
     encrypt: bool = False
     provenance: Provenance | None = None
+    sensitivity: list[str] = Field(default_factory=list)
 
 
 class StoreResponse(BaseModel):
@@ -550,6 +558,10 @@ class EconomicsObservation(BaseModel):
     latency_ms: float | None = Field(default=None, ge=0.0)
     retrievals: int | None = Field(default=None, ge=0)
     wire_bytes: int | None = Field(default=None, ge=0)
+    infrastructure_cost_usd: float = Field(default=0.0, ge=0.0)
+    retrieval_cost_usd: float = Field(default=0.0, ge=0.0)
+    retry_cost_usd: float = Field(default=0.0, ge=0.0)
+    provider_cost_usd: float | None = Field(default=None, ge=0.0)
     provider: str | None = None
     model: str | None = None
 
@@ -567,6 +579,7 @@ class CounterfactualPatternRequest(BaseModel):
     model: str = "*"
     task_family: str = "*"
     workspace: str = "default"
+    validation_id: str = Field(min_length=1, max_length=256)
 
 
 class CalibrationRecordRequest(BaseModel):
@@ -595,6 +608,7 @@ class FactPutRequest(BaseModel):
     workspace: str = "default"
     depends_on: list[str] = Field(default_factory=list)
     provenance: Provenance | None = None
+    sensitivity: list[str] = Field(default_factory=list)
 
 
 class FactResponse(BaseModel):
@@ -606,6 +620,7 @@ class FactResponse(BaseModel):
     source: str | None = None
     confidence: float
     status: str
+    sensitivity: list[str] = Field(default_factory=list)
     contradictions: list[str] = Field(default_factory=list)
 
 
@@ -684,3 +699,52 @@ class ContradictionResolveRequest(BaseModel):
     winner_fact_id: str
     workspace: str = "default"
     note: str = ""
+
+class ModelIdentityRequest(BaseModel):
+    receiver: str = Field(min_length=1, max_length=128)
+    workspace: str = "default"
+    provider: str = Field(min_length=1, max_length=128)
+    model: str = Field(min_length=1, max_length=256)
+    model_version: str = Field(min_length=1, max_length=128)
+    runtime: str = Field(min_length=1, max_length=128)
+    runtime_version: str = Field(min_length=1, max_length=128)
+    configuration: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class ModelIdentityResponse(BaseModel):
+    receiver: str
+    workspace: str
+    provider: str
+    model: str
+    model_version: str
+    runtime: str
+    runtime_version: str
+    config_hash: str
+    identity_hash: str
+    active: bool
+
+
+class MerkleSyncRequest(BaseModel):
+    namespace: str = Field(min_length=1, max_length=128)
+    remote: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class CodebookReleaseRequest(BaseModel):
+    namespace: str = Field(min_length=1, max_length=128)
+    release: str = Field(min_length=1, max_length=128)
+
+
+class CheckpointResponse(BaseModel):
+    checkpoint_id: str
+    state_id: str
+    revision: int
+    payload_hash: str
+
+
+class ReliabilityResponse(BaseModel):
+    status: str
+    samples: int
+    fidelity: float | None = None
+    drift_score: float = 0.0
+    window_start: str | None = None
+

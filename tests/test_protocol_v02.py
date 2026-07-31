@@ -77,7 +77,7 @@ def test_packaged_wire_schema_matches_reference_model():
     from importlib.resources import files
     from sage_plugin.protocol_spec import wire_schema
 
-    packaged = json.loads(files("sage_plugin").joinpath("spec/wire-v2.schema.json").read_text(encoding="utf-8"))
+    packaged = json.loads(files("sage_plugin").joinpath("spec/schemas/wire-v2.schema.json").read_text(encoding="utf-8"))
     assert packaged == wire_schema()
 
 
@@ -100,6 +100,6 @@ def test_packaged_protocol_spec_and_protobuf_binding_present():
     assert 'package sage.v02;' in proto
     assert 'uint32 wire_version = 1; // MUST be 2.' in proto
     assert 'string protocol = 1' in proto
-    pattern_schema = json.loads(root.joinpath('pattern-v0.2.schema.json').read_text(encoding='utf-8'))
+    pattern_schema = json.loads(root.joinpath('schemas/pattern-v0.2.schema.json').read_text(encoding='utf-8'))
     assert pattern_schema['title'] == 'ProtocolPattern'
     assert 'composition' in pattern_schema['properties']

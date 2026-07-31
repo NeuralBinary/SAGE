@@ -66,11 +66,14 @@ def main() -> None:
                         if kw.arg == "verify" and isinstance(kw.value, ast.Constant) and kw.value.value is False:
                             failures.append(f"{path.relative_to(ROOT)}:{node.lineno}: TLS verification disabled")
 
-    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-    if re.search(r"^\s*POSTGRES_PASSWORD:\s*(?!\$\{)[^\s]+", compose, re.MULTILINE):
-        failures.append("docker-compose.yml: embedded PostgreSQL password")
-    if "SAGE_AUTH_REQUIRED: \"false\"" in compose:
-        failures.append("docker-compose.yml: production auth disabled")
+    for compose_path in [ROOT / "docker-compose.yml", ROOT / "deploy" / "staging" / "compose.yml"]:
+        compose = compose_path.read_text(encoding="utf-8")
+        label = str(compose_path.relative_to(ROOT))
+        if re.search(r"^\s*POSTGRES_PASSWORD:\s*(?!\$\{)[^\s]+", compose, re.MULTILINE):
+            failures.append(f"{label}: embedded PostgreSQL password")
+        if 'SAGE_AUTH_REQUIRED: "false"' in compose:
+            failures.append(f"{label}: production auth disabled")
+
 
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     if re.search(r"^USER\s+root\s*$", dockerfile, re.MULTILINE):

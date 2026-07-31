@@ -55,6 +55,7 @@ sage-conform = "sage_plugin.conformance:main"
 sage-inspect = "sage_plugin.inspect_cli:main"
 sage-bench = "sage_plugin.economics:main"
 sage-qualify = "sage_plugin.qualification:main"
+sage-learn = "sage_plugin.learning_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -78,4 +79,4 @@ strict = true
 warn_unused_ignores = true
 
 [tool.setuptools.package-data]
-sage_plugin = ["spec/*", "tck/*.json", "tck/vectors/*.json"]
+sage_plugin = ["spec/*", "spec/schemas/*.json", "tck/*.json", "tck/vectors/*.json"]

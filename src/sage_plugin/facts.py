@@ -10,6 +10,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from .db_models import Contradiction, FactDependency, SemanticFact
+from .information_flow import InformationFlowStore
 
 
 def _now() -> datetime:
@@ -28,6 +29,7 @@ def _fact_id(workspace: str, subject: str, predicate: str, value: Any, source: s
 class FactStore:
     def __init__(self, db: Session) -> None:
         self.db = db
+        self.flow = InformationFlowStore(db)
 
     def get(self, fact_id: str, *, workspace: str | None = None) -> SemanticFact | None:
         item = self.db.get(SemanticFact, fact_id)
@@ -47,6 +49,7 @@ class FactStore:
         confidence: float = 1.0,
         provenance: dict[str, Any] | None = None,
         depends_on: list[str] | None = None,
+        sensitivity: list[str] | None = None,
     ) -> SemanticFact:
         ident = _fact_id(workspace, subject, predicate, object, source)
         existing = self.db.get(SemanticFact, ident)
@@ -66,14 +69,19 @@ class FactStore:
             source=source,
             confidence=confidence,
             provenance=provenance or {},
+            sensitivity=sorted(set(sensitivity or [])),
         )
         self.db.add(item)
         self.db.flush()
+        inherited = set(sensitivity or [])
         for parent_id in depends_on or []:
             parent = self.get(parent_id, workspace=workspace)
             if parent is None:
                 raise KeyError(parent_id)
+            inherited.update(parent.sensitivity or [])
             self.db.add(FactDependency(parent_fact_id=parent_id, child_fact_id=ident))
+        item.sensitivity = sorted(inherited)
+        self.flow.assign(workspace, "fact", ident, inherited)
         self.db.flush()
         self._detect_contradictions(item)
         return item
@@ -186,5 +194,6 @@ class FactStore:
             "source": item.source,
             "confidence": item.confidence,
             "status": item.status,
+            "sensitivity": item.sensitivity,
             "contradictions": [c.id for c in self.contradictions(item.id)],
         }

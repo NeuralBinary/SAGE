@@ -87,3 +87,19 @@ Exact concept lookup remains indexed. Fuzzy matching uses exhaustive comparison 
 If the bounded candidate set cannot establish a safe match, SAGE transmits a lossless literal/reference representation. Runtime cost therefore remains bounded rather than falling back to an unbounded full-vocabulary scan.
 
 Scale qualification should record exact and fuzzy p50/p95/p99 latency at increasing vocabulary sizes and treat both latency and semantic fidelity as release gates.
+
+The dispatch-only `.github/workflows/scale.yml` extends qualification to 1,000,000 concepts by default and runs a configurable PostgreSQL/TLS staging soak without slowing ordinary pull-request gates.
+
+## Vocabulary and query budgets
+
+Run `sage-qualify --vocabulary 100,1000,5000` to measure exact and bounded-fuzzy lookup. Exact lookup remains indexed; vocabularies beyond the configured scan limit use bounded LSH candidate retrieval. Run `sage-qualify --profile-encode --profile-iterations 30 --max-query-count 40` before release. The command fails when the encode SQL statement budget is exceeded even when wall-clock latency remains below the local ceiling.
+
+## Distributed qualification
+
+`deploy/staging/compose.yml`, `scripts/soak_cluster.py`, and `scripts/cluster_chaos.py` provide the production-shape qualification path: PostgreSQL, three SAGE workers, TLS load balancing, durable handoff/claim/ACK, worker loss, database outage, readiness failure, and recovery. CI executes a short gate; long-running release candidates should use the same tooling for sustained load.
+
+## Cross-model task economics
+
+`src/sage_plugin/corpus.py` defines a reproducible JSONL task corpus containing sender state, receiver prior state, full context, task intent, expected outcome, and strategy representations. `scripts/model_matrix_benchmark.py` invokes explicitly configured model commands and records observed task success, input/output tokens, latency, retries, semantic loss, wire bytes, and provider/infrastructure cost. It never fabricates provider measurements when a model adapter or credentials are absent.
+
+Release analysis should compare raw context, caller-supplied retrieval/summary strategies, state+refs, structural SAGE, learned patterns, and receiver-aware SAGE. The primary economic metrics are net successful-task savings and task utility per transmitted bit, not compression ratio alone.

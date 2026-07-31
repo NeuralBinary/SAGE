@@ -27,7 +27,7 @@ def test_negotiation_returns_fingerprint():
         assert body["missing_codes"]
 
 
-def test_negotiation_rejects_non_v01_peer():
+def test_negotiation_rejects_non_v02_peer():
     with TestClient(app) as client:
         response = client.post(
             "/v1/negotiate",

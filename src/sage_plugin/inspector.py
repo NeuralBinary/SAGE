@@ -24,12 +24,19 @@ class Inspector:
             ref = self.db.get(Reference, ref_id)
             refs.append({"ref": ref_id, "byte_size": ref.byte_size if ref else None})
         omitted = sum(int(d.get("estimated_savings_bytes", 0)) for d in patterns if d.get("action") == "pattern_code")
+        known_bytes = int(round(audit.input_bytes * float(audit.receiver_known_ratio or 0.0)))
+        total_avoided = max(0, int(audit.input_bytes) - int(audit.output_bytes))
         waterfall = {
             "original_bytes": audit.input_bytes,
+            "original_tokens_estimate": audit.original_token_estimate,
             "receiver_already_known_ratio": audit.receiver_known_ratio,
+            "receiver_known_bytes_estimate": known_bytes,
             "pattern_bytes_avoided_estimate": omitted,
             "ref_bytes_avoided": audit.ref_bytes_avoided,
+            "total_bytes_avoided": total_avoided,
             "sent_bytes": audit.output_bytes,
+            "sent_tokens_estimate": audit.estimated_tokens,
+            "byte_reduction_ratio": (total_avoided / audit.input_bytes if audit.input_bytes else 0.0),
         }
         return {
             "packet_id": audit.packet_id,

@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     promotion_min_savings_bytes: int = 64
     promotion_max_neighbor_similarity: float = 0.88
     pattern_learning_enabled: bool = True
+    learning_mode: Literal["observe", "managed"] = "observe"
     pattern_string_constants_enabled: bool = False
     pattern_min_components: int = 2
     pattern_max_components: int = 6
@@ -91,6 +92,7 @@ class Settings(BaseSettings):
     bus_claim_lease_seconds: int = 60
     default_bus_ttl_seconds: int | None = None
     audit_retention_days: int = 30
+    state_retention_days: int = 90
     native_token_min_eval_score: float = 0.98
     benchmark_tokenizer_api_key: SecretStr | None = None
     benchmark_tokenizer_allowed_hosts: list[str] = Field(default_factory=list)
@@ -104,6 +106,24 @@ class Settings(BaseSettings):
     routing_cost_weight: float = 1.0
     routing_latency_weight: float = 0.001
     routing_knowledge_weight: float = 2.0
+    pattern_holdout_min_samples: int = 5
+    pattern_holdout_min_sources: int = 3
+    pattern_holdout_min_fidelity: float = 0.995
+    pattern_drift_window_minutes: int = 60
+    pattern_drift_min_samples: int = 20
+    pattern_drift_max_drop: float = 0.05
+    checkpoint_interval_revisions: int = 1000
+    idempotency_ttl_seconds: int = 86400
+    quota_window_seconds: int = 60
+    quota_handoffs_per_window: int = 10000
+    quota_handoffs_per_agent_window: int = 2000
+    quota_ref_bytes_per_window: int = 1_000_000_000
+    quota_pattern_observations_per_window: int = 100000
+    max_pending_messages_per_workspace: int = 100000
+    backpressure_degraded_ratio: float = 0.70
+    backpressure_throttled_ratio: float = 0.90
+    bus_partition_count: int = 64
+    gc_retain_audit_replay: bool = True
 
     @field_validator("api_keys", mode="before")
     @classmethod
@@ -119,7 +139,7 @@ class Settings(BaseSettings):
             return [v.strip().lower() for v in value.split(",") if v.strip()]
         return value
 
-    @field_validator("semantic_threshold", "semantic_lossless_threshold", "promotion_max_neighbor_similarity", "native_token_min_eval_score", "pattern_shadow_min_success", "critical_semantic_threshold", "pattern_counterfactual_min_fidelity", "pattern_receiver_min_fidelity", "pattern_namespace_promotion_min_utility", "pattern_max_source_share", "pattern_min_trust_score", "calibration_max_ece")
+    @field_validator("semantic_threshold", "semantic_lossless_threshold", "promotion_max_neighbor_similarity", "native_token_min_eval_score", "pattern_shadow_min_success", "critical_semantic_threshold", "pattern_counterfactual_min_fidelity", "pattern_receiver_min_fidelity", "pattern_namespace_promotion_min_utility", "pattern_max_source_share", "pattern_min_trust_score", "calibration_max_ece", "pattern_holdout_min_fidelity", "pattern_drift_max_drop", "backpressure_degraded_ratio", "backpressure_throttled_ratio")
     @classmethod
     def validate_ratio(cls, value: float) -> float:
         if not 0.0 <= value <= 1.0:
@@ -133,7 +153,7 @@ class Settings(BaseSettings):
             raise ValueError("chars_per_token_estimate must be > 0")
         return value
 
-    @field_validator("max_inline_bytes", "max_input_bytes", "max_store_bytes", "max_packet_bytes", "default_token_budget", "http_max_body_bytes", "semantic_cache_ttl_seconds", "bus_claim_lease_seconds", "audit_retention_days", "db_pool_size", "db_pool_timeout_seconds", "db_pool_recycle_seconds", "semantic_candidate_limit", "semantic_fuzzy_scan_limit")
+    @field_validator("max_inline_bytes", "max_input_bytes", "max_store_bytes", "max_packet_bytes", "default_token_budget", "http_max_body_bytes", "semantic_cache_ttl_seconds", "bus_claim_lease_seconds", "audit_retention_days", "state_retention_days", "db_pool_size", "db_pool_timeout_seconds", "db_pool_recycle_seconds", "semantic_candidate_limit", "semantic_fuzzy_scan_limit", "pattern_holdout_min_samples", "pattern_holdout_min_sources", "pattern_drift_window_minutes", "pattern_drift_min_samples", "checkpoint_interval_revisions", "idempotency_ttl_seconds", "quota_window_seconds", "quota_handoffs_per_window", "quota_handoffs_per_agent_window", "quota_ref_bytes_per_window", "quota_pattern_observations_per_window", "max_pending_messages_per_workspace", "bus_partition_count")
     @classmethod
     def validate_positive_integer(cls, value: int) -> int:
         if value < 1:
@@ -182,6 +202,8 @@ class Settings(BaseSettings):
             raise ValueError("calibration settings are invalid")
         if self.pattern_gc_cooling_days < 1 or self.pattern_gc_retire_days < self.pattern_gc_cooling_days:
             raise ValueError("pattern GC thresholds are invalid")
+        if self.backpressure_degraded_ratio >= self.backpressure_throttled_ratio:
+            raise ValueError("backpressure_degraded_ratio must be less than backpressure_throttled_ratio")
         if self.auth_required:
             if not self.api_keys:
                 raise ValueError("at least one service api_key must be configured when auth_required=true")

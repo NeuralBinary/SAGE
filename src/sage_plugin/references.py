@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from .config import Settings
 from .db_models import Reference, ReferenceGrant
+from .resilience import QuotaManager
 
 
 def canonical_bytes(value: Any) -> bytes:
@@ -129,6 +130,7 @@ class ReferenceStore:
         tier: str = "warm",
         ttl_seconds: int | None = None,
         provenance: dict[str, Any] | None = None,
+        sensitivity: list[str] | None = None,
     ) -> ReferenceGrant:
         if self.db.get(Reference, ref_id) is None:
             raise KeyError(ref_id)
@@ -151,6 +153,8 @@ class ReferenceStore:
             existing.invalidated_at = None
             if provenance:
                 existing.provenance = provenance
+            if sensitivity is not None:
+                existing.sensitivity = sorted(set(sensitivity))
             existing.version += 1
             return existing
         item = ReferenceGrant(
@@ -161,6 +165,7 @@ class ReferenceStore:
             allowed_paths=sorted(set(allowed_paths or [])),
             tier=tier,
             provenance=provenance or {},
+            sensitivity=sorted(set(sensitivity or [])),
             expires_at=expires,
         )
         self.db.add(item)
@@ -180,10 +185,13 @@ class ReferenceStore:
         ttl_seconds: int | None = None,
         encrypt: bool = False,
         provenance: dict[str, Any] | None = None,
+        sensitivity: list[str] | None = None,
     ) -> Reference:
         if tier not in {"hot", "warm", "cold"}:
             raise ValueError("tier must be hot, warm, or cold")
         data = canonical_bytes(value)
+        if self.settings is not None:
+            QuotaManager(self.db, self.settings).consume(workspace, "ref_bytes", len(data))
         if self.settings is not None and len(data) > self.settings.max_store_bytes:
             raise ValueError(f"payload exceeds max_store_bytes={self.settings.max_store_bytes}")
         encrypt = encrypt or bool(self.settings and self.settings.require_ref_encryption)
@@ -218,6 +226,7 @@ class ReferenceStore:
             tier=tier,
             ttl_seconds=ttl_seconds,
             provenance=provenance,
+            sensitivity=sensitivity,
         )
         return ref
 

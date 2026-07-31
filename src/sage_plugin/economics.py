@@ -108,18 +108,29 @@ def score_observation(observation: dict[str, Any], price: dict[str, float]) -> d
     input_tokens = int(observation.get("input_tokens", 0))
     output_tokens = int(observation.get("output_tokens", 0))
     success = observation.get("task_success")
-    cost = strategy_cost(
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        input_per_million=float(price.get("input_per_million", 0.0)),
-        output_per_million=float(price.get("output_per_million", 0.0)),
-    )
+    model_cost = observation.get("provider_cost_usd")
+    if model_cost is None:
+        model_cost = strategy_cost(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            input_per_million=float(price.get("input_per_million", 0.0)),
+            output_per_million=float(price.get("output_per_million", 0.0)),
+        )
+    model_cost = float(model_cost)
+    infrastructure_cost = float(observation.get("infrastructure_cost_usd", 0.0) or 0.0)
+    retrieval_cost = float(observation.get("retrieval_cost_usd", 0.0) or 0.0)
+    retry_cost = float(observation.get("retry_cost_usd", 0.0) or 0.0)
+    cost = model_cost + infrastructure_cost + retrieval_cost + retry_cost
+    wire_bytes = observation.get("wire_bytes")
+    bits = int(wire_bytes) * 8 if wire_bytes is not None else None
     return {
         **observation,
+        "model_cost": model_cost,
         "cost": cost,
         "successful_tasks_per_dollar": (
             float(success) / cost if success is not None and cost > 0 else None
         ),
+        "task_utility_per_bit": (float(success) / bits if success is not None and bits and bits > 0 else None),
     }
 
 
@@ -149,6 +160,13 @@ def benchmark_representations(
             price,
         )
         rows.append(row)
+    baseline = next((row for row in rows if row["strategy"] == "raw_history"), None)
+    if baseline is not None:
+        for row in rows:
+            row["net_savings_vs_raw_history"] = float(baseline["cost"]) - float(row["cost"])
+            baseline_bytes = int(baseline.get("wire_bytes") or 0)
+            row_bytes = int(row.get("wire_bytes") or 0)
+            row["wire_reduction_vs_raw_history"] = (1.0 - row_bytes / baseline_bytes) if baseline_bytes else None
     return {
         "tokenizer": {"name": counter.name, "exact": counter.exact},
         "price": price,
@@ -339,12 +357,15 @@ def score_observed_runs(observations: list[dict[str, Any]], price: dict[str, flo
                 "latency_samples": 0.0,
                 "retrievals": 0.0,
                 "retrieval_samples": 0.0,
+                "wire_bits": 0.0,
             },
         )
         bucket["runs"] += 1
         bucket["cost"] += float(row["cost"])
         bucket["input_tokens"] += float(row.get("input_tokens", 0))
         bucket["output_tokens"] += float(row.get("output_tokens", 0))
+        if row.get("wire_bytes") is not None:
+            bucket["wire_bits"] += float(row["wire_bytes"]) * 8.0
         if row.get("task_success") is not None:
             bucket["success"] += float(row["task_success"])
         if row.get("latency_ms") is not None:
@@ -365,5 +386,6 @@ def score_observed_runs(observations: list[dict[str, Any]], price: dict[str, flo
             "successful_tasks_per_dollar": (values["success"] / values["cost"] if values["cost"] > 0 else None),
             "avg_latency_ms": (values["latency_ms"] / values["latency_samples"] if values["latency_samples"] > 0 else None),
             "avg_retrievals": (values["retrievals"] / values["retrieval_samples"] if values["retrieval_samples"] > 0 else None),
+            "task_utility_per_bit": (values["success"] / values["wire_bits"] if values["wire_bits"] > 0 else None),
         }
     return {"price": price, "observations": rows, "summary": summary}
