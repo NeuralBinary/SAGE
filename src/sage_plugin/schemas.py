@@ -33,8 +33,13 @@ class Atom(BaseModel):
     epistemic_type: EpistemicType = "fact"
 
 
+class TraceContext(BaseModel):
+    traceparent: str = Field(pattern=r"^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$", max_length=55)
+    tracestate: str | None = Field(default=None, max_length=512)
+
+
 class Packet(BaseModel):
-    v: str = "sage/0.1"
+    v: str = "sage/0.2"
     id: str | None = None
     cb: str
     sender: str | None = None
@@ -47,6 +52,7 @@ class Packet(BaseModel):
     prov: Provenance = Field(default_factory=Provenance)
     meta: dict[str, JsonValue] = Field(default_factory=dict)
     signature: dict[str, JsonValue] | None = None
+    trace: TraceContext | None = None
 
 
 class Budget(BaseModel):
@@ -66,6 +72,7 @@ class EncodeRequest(BaseModel):
     inline_limit: int | None = None
     budget: Budget | None = None
     provenance: Provenance | None = None
+    trace: TraceContext | None = None
     workspace: str = "default"
     run_id: str | None = None
     fallback_mode: FallbackMode = "natural_language"
@@ -74,6 +81,9 @@ class EncodeRequest(BaseModel):
     record_learning: bool = True
     use_patterns: bool = True
     receiver_model: str | None = None
+    task_family: str = "*"
+    source_trust: float = Field(default=1.0, ge=0.0, le=1.0)
+    learning_scope: Literal["session", "project", "workspace", "domain", "federation"] = "session"
     semantic_loss_max: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
@@ -342,6 +352,9 @@ class ConceptResponse(BaseModel):
 class PatternObserveRequest(BaseModel):
     content: JsonValue
     codebook: str | None = None
+    source_ids: list[str] = Field(default_factory=list)
+    source_trust: float = Field(default=0.5, ge=0.0, le=1.0)
+    trust_scope: Literal["session", "project", "workspace", "domain", "federation"] = "session"
 
 
 class PatternStatusRequest(BaseModel):
@@ -357,6 +370,10 @@ class PatternCandidateResponse(BaseModel):
     occurrence_count: int
     estimated_savings_bytes: int
     semantic_variance: float
+    trust_scope: str = "session"
+    source_diversity: int = 0
+    dominant_source_share: float = 1.0
+    trust_score: float = 0.0
 
 
 class PatternResponse(BaseModel):
@@ -380,13 +397,18 @@ class PatternResponse(BaseModel):
     utility_score: float = 0.0
     ambiguity_score: float = 0.0
     interoperability_score: float = 1.0
+    calibrated_reliability: float = 1.0
+    trust_scope: str = "session"
+    source_diversity: int = 0
+    dominant_source_share: float = 1.0
+    trust_score: float = 0.0
     use_count: int = 0
     last_used_at: str | None = None
     children: list[str] = Field(default_factory=list)
 
 
 class LatentPacket(BaseModel):
-    v: str = "sage-latent/0.1"
+    v: str = "sage-latent/0.2"
     space: str
     dims: int = Field(gt=0, le=262144)
     scale: float = Field(gt=0)
@@ -404,7 +426,7 @@ class LatentUnpackRequest(BaseModel):
 
 
 class Capabilities(BaseModel):
-    protocol_versions: list[str] = Field(default_factory=lambda: ["sage/0.1"])
+    protocol_versions: list[str] = Field(default_factory=lambda: ["sage/0.2"])
     codebooks: list[str] = Field(default_factory=list)
     max_packet_bytes: int = Field(default=8192, gt=0)
     supports_refs: bool = True
@@ -543,7 +565,24 @@ class CounterfactualPatternRequest(BaseModel):
     semantic_fidelity: float = Field(ge=0.0, le=1.0)
     receiver: str = "*"
     model: str = "*"
+    task_family: str = "*"
     workspace: str = "default"
+
+
+class CalibrationRecordRequest(BaseModel):
+    predicted: float = Field(ge=0.0, le=1.0)
+    observed: float = Field(ge=0.0, le=1.0)
+    receiver: str = "*"
+    model: str = "*"
+    task_family: str = "*"
+    workspace: str = "default"
+
+
+class CalibrationResponse(BaseModel):
+    sample_count: int
+    expected_calibration_error: float
+    brier_score: float
+    calibrated_probability: float
 
 
 class FactPutRequest(BaseModel):

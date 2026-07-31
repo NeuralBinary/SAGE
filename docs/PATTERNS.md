@@ -1,6 +1,6 @@
 # SAGE higher-order patterns
 
-SAGE v0.1 persists higher-order recurring semantic templates in the primary database. SQLite is suitable for local development; PostgreSQL is the production target.
+SAGE v0.2 persists higher-order recurring semantic templates in the primary database. SQLite is suitable for local development; PostgreSQL is the production target.
 
 ## Storage and graph structure
 
@@ -51,3 +51,25 @@ Garbage collection moves old active patterns to cooling and later retirement. Us
 - `SAGE_PATTERN_GC_COOLING_DAYS`
 - `SAGE_PATTERN_GC_RETIRE_DAYS`
 - `SAGE_PATTERN_NAMESPACE_PROMOTION_MIN_UTILITY`
+
+## Source trust and promotion scope
+
+v0.2 records source evidence separately from pattern frequency. Normal sends derive source identity from the authenticated/logical sender; provenance does not create additional source diversity.
+
+Default minimum distinct trusted sources increase by scope:
+
+| Scope | Minimum sources |
+| --- | ---: |
+| session | 2 |
+| project | 3 |
+| workspace | 4 |
+| domain | 6 |
+| federation | 8 |
+
+The thresholds are configurable. Promotion also enforces the dominant-source-share and aggregate trust thresholds, so splitting a high-volume stream across repeated observations from one source cannot create broad vocabulary authority.
+
+## Reliability calibration
+
+Receiver/model/task evidence is bucketed by predicted confidence and observed downstream outcome. SAGE tracks sample count, expected calibration error, Brier score, and a calibrated probability. Pattern selection uses the lower of raw receiver fidelity and calibrated reliability when sufficient evidence exists.
+
+Calibration is evidence for compression policy, not a replacement for the semantic-loss firewall or counterfactual validation.

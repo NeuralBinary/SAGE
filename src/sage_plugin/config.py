@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     chars_per_token_estimate: float = 4.0
     semantic_threshold: float = 0.93
     semantic_lossless_threshold: float = 0.985
+    semantic_lsh_bits: int = 10
+    semantic_lsh_hamming: int = 1
+    semantic_candidate_limit: int = 512
+    semantic_fuzzy_scan_limit: int = 1000
     promotion_min_count: int = 8
     promotion_min_savings_bytes: int = 64
     promotion_max_neighbor_similarity: float = 0.88
@@ -57,6 +61,19 @@ class Settings(BaseSettings):
     pattern_gc_cooling_days: int = 30
     pattern_gc_retire_days: int = 90
     pattern_namespace_promotion_min_utility: float = 0.95
+    pattern_trust_required: bool = True
+    pattern_min_source_diversity: int = 2
+    pattern_max_source_share: float = 0.75
+    pattern_min_trust_score: float = 0.6
+    pattern_default_trust_scope: Literal["session", "project", "workspace", "domain", "federation"] = "session"
+    pattern_session_min_sources: int = 2
+    pattern_project_min_sources: int = 3
+    pattern_workspace_min_sources: int = 4
+    pattern_domain_min_sources: int = 6
+    pattern_federation_min_sources: int = 8
+    calibration_buckets: int = 10
+    calibration_min_samples: int = 20
+    calibration_max_ece: float = 0.08
     codebook: str = "global"
     core_codebook: str = "core"
     max_message_atoms: int = 256
@@ -102,7 +119,7 @@ class Settings(BaseSettings):
             return [v.strip().lower() for v in value.split(",") if v.strip()]
         return value
 
-    @field_validator("semantic_threshold", "semantic_lossless_threshold", "promotion_max_neighbor_similarity", "native_token_min_eval_score", "pattern_shadow_min_success", "critical_semantic_threshold", "pattern_counterfactual_min_fidelity", "pattern_receiver_min_fidelity", "pattern_namespace_promotion_min_utility")
+    @field_validator("semantic_threshold", "semantic_lossless_threshold", "promotion_max_neighbor_similarity", "native_token_min_eval_score", "pattern_shadow_min_success", "critical_semantic_threshold", "pattern_counterfactual_min_fidelity", "pattern_receiver_min_fidelity", "pattern_namespace_promotion_min_utility", "pattern_max_source_share", "pattern_min_trust_score", "calibration_max_ece")
     @classmethod
     def validate_ratio(cls, value: float) -> float:
         if not 0.0 <= value <= 1.0:
@@ -116,7 +133,7 @@ class Settings(BaseSettings):
             raise ValueError("chars_per_token_estimate must be > 0")
         return value
 
-    @field_validator("max_inline_bytes", "max_input_bytes", "max_store_bytes", "max_packet_bytes", "default_token_budget", "http_max_body_bytes", "semantic_cache_ttl_seconds", "bus_claim_lease_seconds", "audit_retention_days", "db_pool_size", "db_pool_timeout_seconds", "db_pool_recycle_seconds")
+    @field_validator("max_inline_bytes", "max_input_bytes", "max_store_bytes", "max_packet_bytes", "default_token_budget", "http_max_body_bytes", "semantic_cache_ttl_seconds", "bus_claim_lease_seconds", "audit_retention_days", "db_pool_size", "db_pool_timeout_seconds", "db_pool_recycle_seconds", "semantic_candidate_limit", "semantic_fuzzy_scan_limit")
     @classmethod
     def validate_positive_integer(cls, value: int) -> int:
         if value < 1:
@@ -132,6 +149,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_security(self) -> "Settings":
+        if not 4 <= self.semantic_lsh_bits <= 24:
+            raise ValueError("semantic_lsh_bits must be in [4, 24]")
+        if not 0 <= self.semantic_lsh_hamming <= 2:
+            raise ValueError("semantic_lsh_hamming must be in [0, 2]")
         if self.pattern_min_components < 2:
             raise ValueError("pattern_min_components must be >= 2")
         if self.pattern_max_components < self.pattern_min_components:
@@ -146,6 +167,19 @@ class Settings(BaseSettings):
             raise ValueError("pattern_candidate_retention_days must be >= 1")
         if self.pattern_counterfactual_min_samples < 1:
             raise ValueError("pattern_counterfactual_min_samples must be >= 1")
+        if self.pattern_min_source_diversity < 1:
+            raise ValueError("pattern_min_source_diversity must be >= 1")
+        scope_sources = [
+            self.pattern_session_min_sources,
+            self.pattern_project_min_sources,
+            self.pattern_workspace_min_sources,
+            self.pattern_domain_min_sources,
+            self.pattern_federation_min_sources,
+        ]
+        if any(value < 1 for value in scope_sources) or scope_sources != sorted(scope_sources):
+            raise ValueError("pattern trust-scope source thresholds must be positive and nondecreasing")
+        if self.calibration_buckets < 2 or self.calibration_min_samples < 1:
+            raise ValueError("calibration settings are invalid")
         if self.pattern_gc_cooling_days < 1 or self.pattern_gc_retire_days < self.pattern_gc_cooling_days:
             raise ValueError("pattern GC thresholds are invalid")
         if self.auth_required:

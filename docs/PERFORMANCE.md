@@ -67,3 +67,23 @@ Keep SAGE, PostgreSQL, and latency-sensitive agent runtimes within low-latency n
 ## Measurement policy
 
 Performance changes should be accepted only when semantic fidelity and correctness remain unchanged. A smaller packet that changes downstream task behavior is considered a regression regardless of byte or token reduction.
+
+## v0.2 qualification
+
+`SAGE` includes a qualification runner:
+
+```bash
+sage-qualify --configured-concurrency --workers 8 --messages 20
+```
+
+On PostgreSQL this runs concurrent producers and consumers against the configured database and requires every durable message to be consumed once by the qualification run with no pending remainder. SQLite runs concurrent producers but uses one consumer because SQLite does not provide PostgreSQL `FOR UPDATE SKIP LOCKED` semantics.
+
+The Python profiler also records SQL statement count per encode operation. Release tests enforce a query ceiling so a change cannot hide N+1 database growth behind a small fixture.
+
+## Large vocabulary
+
+Exact concept lookup remains indexed. Fuzzy matching uses exhaustive comparison only below `SAGE_SEMANTIC_FUZZY_SCAN_LIMIT`. Larger vocabularies use deterministic locality-sensitive-hash buckets, bounded Hamming-neighbor search, and `SAGE_SEMANTIC_CANDIDATE_LIMIT`.
+
+If the bounded candidate set cannot establish a safe match, SAGE transmits a lossless literal/reference representation. Runtime cost therefore remains bounded rather than falling back to an unbounded full-vocabulary scan.
+
+Scale qualification should record exact and fuzzy p50/p95/p99 latency at increasing vocabulary sizes and treat both latency and semantic fidelity as release gates.

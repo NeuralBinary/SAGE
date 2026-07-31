@@ -88,11 +88,11 @@ def config_for(platform: str, base_url: str, agent_id: str) -> IntegrationConfig
     if p.id == "hermes":
         config["remote_mcp_url"] = mcp_url
         files["env"] = f"SAGE_URL={base}\nSAGE_AGENT_ID={agent_id}\n"
-        commands = ["pip install ./sage_agent_protocol-0.1.0-py3-none-any.whl", "hermes plugins enable sage"]
+        commands = ["pip install ./sage_agent_protocol-0.2.0-py3-none-any.whl", "hermes plugins enable sage"]
     elif p.id == "openclaw":
         config["remote_mcp_url"] = mcp_url
         files["env"] = f"SAGE_URL={base}\nSAGE_AGENT_ID={agent_id}\n"
-        commands = ["openclaw plugins install npm-pack:./sage-agent-openclaw-sage-0.1.0.tgz", "openclaw plugins enable sage", "openclaw plugins inspect sage --runtime --json"]
+        commands = ["openclaw plugins install npm-pack:./sage-agent-openclaw-sage-0.2.0.tgz", "openclaw plugins enable sage", "openclaw plugins inspect sage --runtime --json"]
     elif p.id == "claude":
         config["remote_mcp_url"] = mcp_url
         commands = [f"configure Claude/Claude Code with remote MCP server {mcp_url}"]
@@ -100,5 +100,5 @@ def config_for(platform: str, base_url: str, agent_id: str) -> IntegrationConfig
         config["remote_mcp_url"] = mcp_url
         commands = [f"configure the OpenAI client/app with the SAGE MCP endpoint {mcp_url}"]
     else:
-        commands = ["pip install ./sage_agent_protocol-0.1.0-py3-none-any.whl", "use SageRuntime or POST /v1/bus/handoff"]
+        commands = ["pip install ./sage_agent_protocol-0.2.0-py3-none-any.whl", "use SageRuntime or POST /v1/bus/handoff"]
     return IntegrationConfigResponse(platform=p.id, profile=p, files=files, commands=commands, config=config)

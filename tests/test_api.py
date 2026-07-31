@@ -22,7 +22,7 @@ def test_negotiation_returns_fingerprint():
         response = client.post("/v1/negotiate", json={"known_codes": []})
         assert response.status_code == 200
         body = response.json()
-        assert body["protocol_version"] == "sage/0.1"
+        assert body["protocol_version"] == "sage/0.2"
         assert len(body["fingerprint"]) == 24
         assert body["missing_codes"]
 
@@ -34,7 +34,7 @@ def test_negotiation_rejects_non_v01_peer():
             json={"known_codes": [], "capabilities": {"protocol_versions": ["sage/9.9"]}},
         )
         assert response.status_code == 409
-        assert "sage/0.1" in response.json()["detail"]
+        assert "sage/0.2" in response.json()["detail"]
 
 
 def test_bearer_auth_when_enabled():
@@ -226,3 +226,24 @@ def test_integration_configuration_requires_concrete_connection_values():
     with TestClient(app) as client:
         response = client.get("/v1/integrations/hermes")
         assert response.status_code == 422
+
+
+def test_transport_send_imports_valid_trace_headers_and_rejects_invalid_traceparent():
+    from sage_plugin.main import app
+
+    traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+    with TestClient(app) as client:
+        sent = client.post(
+            "/v1/transport/send",
+            headers={"traceparent": traceparent, "tracestate": "vendor=value"},
+            json={"sender": "researcher", "receiver": "planner", "content": {"status": "ready"}, "use_cache": False},
+        )
+        assert sent.status_code == 200
+        assert sent.json()["wire"]["z"] == {"p": traceparent, "s": "vendor=value"}
+
+        rejected = client.post(
+            "/v1/transport/send",
+            headers={"traceparent": "invalid"},
+            json={"sender": "researcher", "receiver": "planner", "content": {"status": "ready"}, "use_cache": False},
+        )
+        assert rejected.status_code == 422

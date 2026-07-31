@@ -70,15 +70,15 @@ def test_acked_message_cannot_be_nacked():
             bus.nack(item.id, receiver="worker")
 
 
-def test_a2a_data_part_round_trip_and_rejects_non_v01():
-    wire = {"v": 1, "c": "global", "a": "handoff", "p": {}}
+def test_a2a_data_part_round_trip_and_rejects_non_v02():
+    wire = {"v": 2, "c": "global", "a": "handoff", "p": {}}
     part = pack_data_part(wire)
     assert part["mediaType"] == SAGE_MEDIA_TYPE
     assert SAGE_EXTENSION_URI.startswith("urn:uuid:")
-    assert part["data"]["sageProtocol"] == "sage/0.1"
+    assert part["data"]["sageProtocol"] == "sage/0.2"
     assert unpack_data_part(part) == wire
     invalid_wire = {"v": 99, "a": "handoff", "x": [1, 2]}
-    with pytest.raises(ValueError, match="sage/0.1"):
+    with pytest.raises(ValueError, match="sage/0.2"):
         unpack_data_part({"data": {"sageProtocol": "sage/9.9", "wire": invalid_wire}, "mediaType": "application/json"})
     with pytest.raises(Exception):
         pack_data_part(invalid_wire)

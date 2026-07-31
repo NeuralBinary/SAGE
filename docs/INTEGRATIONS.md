@@ -25,7 +25,7 @@ Third-party prompt-mutating/conversation hooks must be enabled according to the 
 
 Use the same remote `/mcp` endpoint. MCP tools include `sage_handoff`, `sage_poll`, `sage_ack`, `sage_send`, `sage_receive`, refs, state, codebooks, evals, and latent transport.
 
-Because MCP authentication is service-scoped in v0.1, use a per-agent gateway/native adapter when mailbox isolation between untrusted agents is required.
+Because MCP authentication is service-scoped in v0.2, use a per-agent gateway/native adapter when mailbox isolation between untrusted agents is required.
 
 ## Generic A2A
 

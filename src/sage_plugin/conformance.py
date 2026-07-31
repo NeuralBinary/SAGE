@@ -9,7 +9,7 @@ from importlib.resources import files
 from typing import Any
 
 from .a2a_adapter import pack_data_part, unpack_data_part
-from .protocol_spec import canonical_digest, canonical_json_bytes, canonical_msgpack_bytes, validate_wire_v1
+from .protocol_spec import canonical_digest, canonical_json_bytes, canonical_msgpack_bytes, validate_wire_v2
 
 
 @dataclass(frozen=True)
@@ -41,7 +41,7 @@ def run_tck() -> TckResult:
         name = case["name"]
         wire = case["wire"]
         try:
-            validate_wire_v1(wire)
+            validate_wire_v2(wire)
             digest = canonical_digest(wire)
             if digest != case["canonical_sha256"]:
                 failures.append(f"{name}: digest {digest} != {case['canonical_sha256']}")
@@ -60,7 +60,7 @@ def run_tck() -> TckResult:
     for case in vectors["invalid"]:
         total += 1
         try:
-            validate_wire_v1(case["wire"])
+            validate_wire_v2(case["wire"])
         except Exception:  # noqa: BLE001
             continue
         failures.append(f"{case['name']}: invalid vector was accepted")
@@ -70,7 +70,7 @@ def run_tck() -> TckResult:
 
 
 def run_wire_fuzz(iterations: int = 100, seed: int = 1) -> TckResult:
-    """Deterministic mutation suite for the frozen v0.1 wire validator.
+    """Deterministic mutation suite for the frozen v0.2 wire validator.
 
     Mutations deliberately violate protocol invariants and must be rejected. It is not
     a replacement for a dedicated coverage-guided fuzzer, but it ships a repeatable
@@ -95,14 +95,14 @@ def run_wire_fuzz(iterations: int = 100, seed: int = 1) -> TckResult:
         wire = copy.deepcopy(rng.choice(valid)["wire"])
         rng.choice(mutators)(wire)
         try:
-            validate_wire_v1(wire)
+            validate_wire_v2(wire)
         except Exception:
             continue
         failures.append(f"mutation-{idx}: malformed wire accepted")
     return TckResult(total=total, passed=total - len(failures), failures=failures)
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run SAGE 0.1 conformance checks")
+    parser = argparse.ArgumentParser(description="Run SAGE 0.2 conformance checks")
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     parser.add_argument("--fuzz", type=int, default=0, metavar="N", help="run N deterministic malformed-wire mutations")
     parser.add_argument("--seed", type=int, default=1, help="mutation seed")

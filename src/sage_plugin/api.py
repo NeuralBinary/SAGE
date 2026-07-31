@@ -5,13 +5,14 @@ from typing import Any
 
 import httpx
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import ValidationError
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from .a2a_adapter import agent_card, agent_card_extension, pack_data_part, pack_message, unpack_data_part, unpack_message
 from .bus import SemanticBus
+from .calibration import CalibrationStore
 from .conformance import run_tck
 from .codebook import Codebook
 from .codec import SageCodec
@@ -30,7 +31,7 @@ from .latent import pack_latent, unpack_latent
 from .patterns import PatternStore
 from .maintenance import cleanup
 from .references import ReferenceAccessError, ReferenceExpiredError, ReferenceStore
-from .protocol_spec import SAGE_PROTOCOL, SAGE_SUPPORTED_PROTOCOLS, SAGE_WIRE_VERSION, canonical_digest, validate_wire_v1, wire_schema
+from .protocol_spec import SAGE_PROTOCOL, SAGE_SUPPORTED_PROTOCOLS, SAGE_WIRE_VERSION, canonical_digest, validate_wire_v2, wire_schema
 from .schemas import (
     A2APackRequest,
     A2AUnpackRequest,
@@ -40,6 +41,8 @@ from .schemas import (
     BusBatchAckRequest,
     BusContextItem,
     BusMessageResponse,
+    CalibrationRecordRequest,
+    CalibrationResponse,
     Capabilities,
     ConceptAliasRequest,
     ConceptDeprecateRequest,
@@ -93,12 +96,22 @@ from .schemas import (
     StoreResponse,
     TransportReceiveRequest,
     TransportResponse,
+    TraceContext,
 )
 from .security import current_principal, enforce_agent_scope, require_api_key
 from .state import StateStore
 
 router = APIRouter(prefix="/v1", dependencies=[Depends(require_api_key)])
 settings = get_settings()
+
+
+def _apply_trace_headers(req: EncodeRequest, traceparent: str | None, tracestate: str | None) -> None:
+    if req.trace is not None or traceparent is None:
+        return
+    try:
+        req.trace = TraceContext(traceparent=traceparent.lower(), tracestate=tracestate)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail="invalid W3C trace context") from exc
 
 
 def concept_response(c: Concept, db: Session | None = None) -> ConceptResponse:
@@ -362,7 +375,7 @@ def protocol_info() -> dict[str, Any]:
         "wire_version": SAGE_WIRE_VERSION,
         "supported_protocols": list(SAGE_SUPPORTED_PROTOCOLS),
         "canonical_digest": "sha256(canonical-msgpack)",
-        "frozen_line": "0.1.x",
+        "frozen_line": "0.2.x",
     }
 
 
@@ -374,7 +387,7 @@ def protocol_wire_schema() -> dict[str, Any]:
 @router.post("/protocol/validate")
 def protocol_validate(wire: dict[str, Any]) -> dict[str, Any]:
     try:
-        validate_wire_v1(wire)
+        validate_wire_v2(wire)
     except (ValidationError, ValueError, TypeError) as exc:
         raise HTTPException(422, str(exc)) from exc
     return {"valid": True, "protocol": SAGE_PROTOCOL, "digest": canonical_digest(wire)}
@@ -403,9 +416,13 @@ def integration_config(
 
 
 @router.post("/send", response_model=EncodeResponse)
-def send(req: SendRequest, db: Session = Depends(get_db)) -> EncodeResponse:
+def send(
+    req: SendRequest, db: Session = Depends(get_db),
+    traceparent: str | None = Header(default=None), tracestate: str | None = Header(default=None),
+) -> EncodeResponse:
     """Primary SAGE transport: receiver-aware, budget-constrained communication."""
     req.sender = enforce_agent_scope(actor=req.sender, workspace=req.workspace)
+    _apply_trace_headers(req, traceparent, tracestate)
     try:
         return SageCodec(db, settings).encode(req)
     except KeyError as exc:
@@ -416,8 +433,12 @@ def send(req: SendRequest, db: Session = Depends(get_db)) -> EncodeResponse:
 
 
 @router.post("/transport/send", response_model=TransportResponse)
-def transport_send(req: SendRequest, db: Session = Depends(get_db)) -> TransportResponse:
+def transport_send(
+    req: SendRequest, db: Session = Depends(get_db),
+    traceparent: str | None = Header(default=None), tracestate: str | None = Header(default=None),
+) -> TransportResponse:
     req.sender = enforce_agent_scope(actor=req.sender, workspace=req.workspace)
+    _apply_trace_headers(req, traceparent, tracestate)
     codec = SageCodec(db, settings)
     try:
         result = codec.encode(req)
@@ -809,7 +830,13 @@ def observe_patterns(req: PatternObserveRequest, db: Session = Depends(get_db)) 
 
     store = PatternStore(db, settings)
     codebook = req.codebook or settings.codebook
-    promoted = store.observe_units(codebook, compile_content(req.content)[: settings.max_message_atoms])
+    promoted = store.observe_units(
+        codebook,
+        compile_content(req.content)[: settings.max_message_atoms],
+        source_ids=req.source_ids,
+        trust_score=req.source_trust,
+        trust_scope=req.trust_scope,
+    )
     db.commit()
     return [PatternResponse.model_validate(store.response(item)) for item in promoted]
 
@@ -843,6 +870,10 @@ def list_pattern_candidates(
             occurrence_count=item.occurrence_count,
             estimated_savings_bytes=item.estimated_savings_bytes,
             semantic_variance=item.semantic_variance,
+            trust_scope=item.trust_scope,
+            source_diversity=item.source_diversity,
+            dominant_source_share=item.dominant_source_share,
+            trust_score=item.trust_score,
         )
         for item in items
     ]
@@ -876,11 +907,37 @@ def set_pattern_status(
 def pattern_counterfactual(pattern_id: str, req: CounterfactualPatternRequest, db: Session = Depends(get_db)) -> PatternResponse:
     store = PatternStore(db, settings)
     try:
-        item = store.record_counterfactual(pattern_id, full_success=req.full_success, compressed_success=req.compressed_success, semantic_fidelity=req.semantic_fidelity, receiver=req.receiver, model=req.model, workspace=req.workspace)
+        item = store.record_counterfactual(pattern_id, full_success=req.full_success, compressed_success=req.compressed_success, semantic_fidelity=req.semantic_fidelity, receiver=req.receiver, model=req.model, task_family=req.task_family, workspace=req.workspace)
     except KeyError as exc:
         raise HTTPException(404, "pattern not found") from exc
     db.commit()
     return PatternResponse.model_validate(store.response(item))
+
+
+@router.post("/calibration/record", response_model=CalibrationResponse)
+def calibration_record(req: CalibrationRecordRequest, db: Session = Depends(get_db)) -> CalibrationResponse:
+    store = CalibrationStore(db, settings.calibration_buckets, settings.calibration_min_samples)
+    store.record(
+        predicted=req.predicted, observed=req.observed, workspace=req.workspace,
+        receiver=req.receiver, model=req.model, task_family=req.task_family,
+    )
+    report = store.report(
+        req.predicted, workspace=req.workspace, receiver=req.receiver,
+        model=req.model, task_family=req.task_family,
+    )
+    db.commit()
+    return CalibrationResponse.model_validate(store.response(report))
+
+
+@router.get("/calibration", response_model=CalibrationResponse)
+def calibration_report(
+    predicted: float = Query(..., ge=0.0, le=1.0), receiver: str = "*", model: str = "*",
+    task_family: str = "*", workspace: str = "default", db: Session = Depends(get_db),
+) -> CalibrationResponse:
+    store = CalibrationStore(db, settings.calibration_buckets, settings.calibration_min_samples)
+    return CalibrationResponse.model_validate(store.response(store.report(
+        predicted, workspace=workspace, receiver=receiver, model=model, task_family=task_family
+    )))
 
 
 @router.post("/patterns/{pattern_id}/promote-namespace", response_model=PatternResponse)

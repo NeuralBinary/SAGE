@@ -2,7 +2,7 @@
 
 ## Database
 
-SQLite is for local/single-process development. Use PostgreSQL in production. Set `SAGE_AUTO_CREATE_SCHEMA=false` and run `alembic upgrade head` during deploy. v0.1 has one baseline migration: `0001_sage_0_1`.
+SQLite is for local/single-process development. Use PostgreSQL in production. Set `SAGE_AUTO_CREATE_SCHEMA=false` and run `alembic upgrade head` during deploy. v0.2 has one baseline migration: `0001_sage_0_2`.
 
 ## Horizontal scaling and delivery
 
@@ -35,7 +35,7 @@ sage-conform --fuzz 1000
 python scripts/release_check.py
 ```
 
-The release checker enforces version `0.1.0`, protocol `sage/0.1`, wire `1`, one baseline migration, repo/package schema equality, spec/protobuf equality and TCK equality.
+The release checker enforces version `0.2.0`, protocol `sage/0.2`, wire `2`, one baseline migration, repo/package schema equality, spec/protobuf equality and TCK equality.
 
 ## Backups
 

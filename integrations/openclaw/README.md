@@ -5,7 +5,7 @@ This native plugin exposes SAGE bus tools, claims cross-agent handoffs in `agent
 Install the packaged adapter with OpenClaw's deterministic local npm-pack source:
 
 ```bash
-openclaw plugins install npm-pack:./sage-agent-openclaw-sage-0.1.0.tgz
+openclaw plugins install npm-pack:./sage-agent-openclaw-sage-0.2.0.tgz
 openclaw plugins enable sage
 openclaw plugins inspect sage --runtime --json
 ```

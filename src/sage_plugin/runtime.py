@@ -225,13 +225,24 @@ class SageRuntime:
             }
 
 
-    def observe_patterns(self, content: Any, *, codebook: str | None = None) -> list[dict[str, Any]]:
+    def observe_patterns(
+        self,
+        content: Any,
+        *,
+        codebook: str | None = None,
+        source_ids: list[str] | None = None,
+        source_trust: float = 0.5,
+        trust_scope: str = "session",
+    ) -> list[dict[str, Any]]:
         """Mine recurring higher-order semantic templates without sending a packet."""
         with SessionLocal() as db:
             store = PatternStore(db, self.settings)
             promoted = store.observe_units(
                 codebook or self.settings.codebook,
                 compile_content(content)[: self.settings.max_message_atoms],
+                source_ids=source_ids,
+                trust_score=source_trust,
+                trust_scope=trust_scope,
             )
             db.commit()
             return [store.response(item) for item in promoted]
@@ -256,6 +267,10 @@ class SageRuntime:
                     "occurrence_count": item.occurrence_count,
                     "estimated_savings_bytes": item.estimated_savings_bytes,
                     "semantic_variance": item.semantic_variance,
+                    "trust_scope": item.trust_scope,
+                    "source_diversity": item.source_diversity,
+                    "dominant_source_share": item.dominant_source_share,
+                    "trust_score": item.trust_score,
                 }
                 for item in items
             ]
@@ -288,10 +303,10 @@ class SageRuntime:
         with SessionLocal() as db:
             return Inspector(db).packet(packet_id)
 
-    def pattern_counterfactual(self, pattern_id: str, *, full_success: float, compressed_success: float, semantic_fidelity: float, receiver: str = "*", model: str = "*", workspace: str = "default") -> dict[str, Any]:
+    def pattern_counterfactual(self, pattern_id: str, *, full_success: float, compressed_success: float, semantic_fidelity: float, receiver: str = "*", model: str = "*", task_family: str = "*", workspace: str = "default") -> dict[str, Any]:
         with SessionLocal() as db:
             store = PatternStore(db, self.settings)
-            item = store.record_counterfactual(pattern_id, full_success=full_success, compressed_success=compressed_success, semantic_fidelity=semantic_fidelity, receiver=receiver, model=model, workspace=workspace)
+            item = store.record_counterfactual(pattern_id, full_success=full_success, compressed_success=compressed_success, semantic_fidelity=semantic_fidelity, receiver=receiver, model=model, task_family=task_family, workspace=workspace)
             db.commit()
             return store.response(item)
 

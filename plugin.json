@@ -1,6 +1,6 @@
 {
   "name": "SAGE",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Vendor-neutral semantic communication runtime and durable bus for AI agents.",
   "runtime": "multi-adapter",
   "entrypoints": {
@@ -18,12 +18,12 @@
     "claude",
     "openai"
   ],
-  "protocol": "sage/0.1",
+  "protocol": "sage/0.2",
   "author": "NeuralBinary",
   "credits": [
     "@NeuralBinary",
     "@ro0ti"
   ],
   "repository": "https://github.com/NeuralBinary/SAGE",
-  "release": "v0.1"
+  "release": "v0.2"
 }

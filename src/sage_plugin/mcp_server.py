@@ -237,7 +237,7 @@ def build_server() -> Any:
 
     @mcp.tool()
     def sage_decode(packet: dict[str, Any], resolve_refs: bool = False) -> dict[str, Any]:
-        """Decode a canonical SAGE 0.1 wire packet."""
+        """Decode a canonical SAGE 0.2 wire packet."""
         with SessionLocal() as db:
             codec = SageCodec(db, settings)
             parsed = codec.expand(packet)
@@ -407,7 +407,7 @@ def build_server() -> Any:
             missing_patterns = [pattern_store.response(p) for p in pattern_store.list(cb_name, status="active")] if supports_patterns else []
             db.commit()
             return {
-                "protocol": "sage/0.1",
+                "protocol": "sage/0.2",
                 "codebook": cb_name,
                 "codebook_chain": cb.namespace_chain(cb_name),
                 "embedding_space": cb.embedding_space,
@@ -443,13 +443,16 @@ def build_server() -> Any:
             ]
 
     @mcp.tool()
-    def sage_observe_patterns(content: Any, codebook: str | None = None) -> list[dict[str, Any]]:
+    def sage_observe_patterns(content: Any, codebook: str | None = None, source_ids: list[str] | None = None, source_trust: float = 0.5, trust_scope: str = "session") -> list[dict[str, Any]]:
         """Mine a payload for recurring higher-order semantic patterns without sending it."""
         with SessionLocal() as db:
             store = PatternStore(db, settings)
             items = store.observe_units(
                 codebook or settings.codebook,
                 compile_content(content)[: settings.max_message_atoms],
+                source_ids=source_ids,
+                trust_score=source_trust,
+                trust_scope=trust_scope,
             )
             db.commit()
             return [store.response(item) for item in items]
@@ -478,7 +481,7 @@ def build_server() -> Any:
 
     @mcp.tool()
     def sage_tck() -> dict[str, Any]:
-        """Run the installed SAGE 0.1 conformance vectors."""
+        """Run the installed SAGE 0.2 conformance vectors."""
         return run_tck().as_dict()
 
     @mcp.tool()
@@ -510,11 +513,11 @@ def build_server() -> Any:
             return Inspector(db).packet(packet_id)
 
     @mcp.tool()
-    def sage_pattern_counterfactual(pattern_id: str, full_success: float, compressed_success: float, semantic_fidelity: float, receiver: str = "*", model: str = "*", workspace: str = "default") -> dict[str, Any]:
+    def sage_pattern_counterfactual(pattern_id: str, full_success: float, compressed_success: float, semantic_fidelity: float, receiver: str = "*", model: str = "*", task_family: str = "*", workspace: str = "default") -> dict[str, Any]:
         """Record paired full-vs-compressed behavior for shadow pattern validation."""
         with SessionLocal() as db:
             store = PatternStore(db, settings)
-            item = store.record_counterfactual(pattern_id, full_success=full_success, compressed_success=compressed_success, semantic_fidelity=semantic_fidelity, receiver=receiver, model=model, workspace=workspace)
+            item = store.record_counterfactual(pattern_id, full_success=full_success, compressed_success=compressed_success, semantic_fidelity=semantic_fidelity, receiver=receiver, model=model, task_family=task_family, workspace=workspace)
             db.commit()
             return store.response(item)
 

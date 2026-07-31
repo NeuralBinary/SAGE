@@ -1,6 +1,6 @@
 # SAGE semantic fabric
 
-SAGE v0.1 is a vendor-neutral semantic transport/runtime. The model/framework adapters are thin; semantic safety, learned patterns, memory, routing, signatures, and conformance live in core.
+SAGE v0.2 is a vendor-neutral semantic transport/runtime. The model/framework adapters are thin; semantic safety, learned patterns, memory, routing, signatures, and conformance live in core.
 
 ## Semantic safety
 

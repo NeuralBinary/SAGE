@@ -15,7 +15,7 @@ from .config import Settings
 from .db_models import Concept, MessageAudit
 from .knowledge import KnowledgeStore
 from .references import ReferenceAccessError, ReferenceExpiredError, ReferenceStore, canonical_bytes
-from .protocol_spec import SAGE_WIRE_VERSION, canonical_json_bytes, canonical_msgpack_bytes, validate_wire_v1
+from .protocol_spec import SAGE_WIRE_VERSION, canonical_json_bytes, canonical_msgpack_bytes, validate_wire_v2
 from .patterns import PatternStore
 from .semantic_safety import assess_unit
 from .signing import sign_wire, verify_wire
@@ -83,6 +83,8 @@ class SageCodec:
             payload["m"] = meta
         if packet.signature:
             payload["g"] = packet.signature
+        if packet.trace is not None:
+            payload["z"] = {k: v for k, v in {"p": packet.trace.traceparent, "s": packet.trace.tracestate}.items() if v is not None}
         return payload
 
     def _wire(self, packet: Packet) -> tuple[str, bytes]:
@@ -99,7 +101,7 @@ class SageCodec:
         return self._compact_payload(packet)
 
     def expand(self, payload: dict[str, Any]) -> Packet:
-        validate_wire_v1(payload)
+        validate_wire_v2(payload)
         if self.settings.require_packet_signatures and "g" not in payload:
             raise ValueError("packet signature required")
         if "g" in payload and self.settings.packet_signing_public_key is not None:
@@ -143,6 +145,7 @@ class SageCodec:
             prov=prov,
             meta=dict(payload.get("m", {})),
             signature=dict(payload.get("g", {})) if payload.get("g") else None,
+            trace={"traceparent": payload["z"]["p"], "tracestate": payload["z"].get("s")} if payload.get("z") else None,
         )
 
     def _semantic_packet(self, request: EncodeRequest, codebook_name: str, provenance: Provenance, decisions: list[dict[str, Any]], *, allow_patterns: bool = True) -> Packet:
@@ -152,12 +155,20 @@ class SageCodec:
             receiver=request.receiver,
             act=request.act,
             prov=provenance,
+            trace=request.trace,
         )
         units = compile_content(request.content)
         bounded_units = units[: self.settings.max_message_atoms]
 
         if request.auto_learn and request.record_learning:
-            promoted = self.patterns.observe_units(codebook_name, bounded_units)
+            sources = [request.sender] if request.sender else []
+            promoted = self.patterns.observe_units(
+                codebook_name,
+                bounded_units,
+                source_ids=sources,
+                trust_score=request.source_trust,
+                trust_scope=request.learning_scope,
+            )
             for pattern in promoted:
                 decisions.append({
                     "action": "pattern_promoted_to_shadow",
@@ -180,10 +191,10 @@ class SageCodec:
             })
 
         if allow_patterns:
-            active = {match.start: match for match in self.patterns.active_matches(codebook_name, bounded_units, receiver=request.receiver, model=request.receiver_model, workspace=request.workspace)}
+            active = {match.start: match for match in self.patterns.active_matches(codebook_name, bounded_units, receiver=request.receiver, model=request.receiver_model, workspace=request.workspace, task_family=request.task_family)}
         else:
             active = {}
-            if self.patterns.active_matches(codebook_name, bounded_units, receiver=request.receiver, model=request.receiver_model, workspace=request.workspace):
+            if self.patterns.active_matches(codebook_name, bounded_units, receiver=request.receiver, model=request.receiver_model, workspace=request.workspace, task_family=request.task_family):
                 decisions.append({"action": "patterns_disabled_receiver", "reason": "receiver_capability"})
 
         def append_unit(unit: Any) -> None:
@@ -262,7 +273,7 @@ class SageCodec:
                             literal=bindings if bindings else None,
                             has_literal=bool(bindings),
                             path=bounded_units[index].path,
-                            confidence=pattern.confidence,
+                            confidence=min(pattern.confidence, pattern.calibrated_reliability),
                             epistemic_type="fact",
                         )
                     )
@@ -318,6 +329,7 @@ class SageCodec:
             refs=[item.id],
             prov=provenance,
             meta=meta,
+            trace=request.trace,
         )
 
     def _delta_packet(self, request: EncodeRequest, base_id: str, codebook_name: str, provenance: Provenance, decisions: list[dict[str, Any]]) -> Packet | None:
@@ -342,6 +354,7 @@ class SageCodec:
             delta=patch,
             prov=provenance,
             meta={"state": target_state.id, "revision": target_state.revision},
+            trace=request.trace,
         )
 
     def encode(self, request: EncodeRequest) -> EncodeResponse:
@@ -382,6 +395,7 @@ class SageCodec:
             "sender": request.sender,
             "receiver": request.receiver,
             "receiver_model": request.receiver_model,
+            "task_family": request.task_family,
             "act": request.act,
             "codebook": codebook_name,
             "base": request.base_state,

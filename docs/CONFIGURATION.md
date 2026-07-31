@@ -44,6 +44,10 @@ SAGE configuration uses environment variables with the `SAGE_` prefix. Names bel
 | --- | --- | --- |
 | `SAGE_SEMANTIC_THRESHOLD` | `0.93` | Similarity threshold for semantic matching. |
 | `SAGE_SEMANTIC_LOSSLESS_THRESHOLD` | `0.985` | Higher confidence required before discarding original surface text. |
+| `SAGE_SEMANTIC_LSH_BITS` | `10` | Bit width used by deterministic locality-sensitive-hash buckets for large vocabularies. |
+| `SAGE_SEMANTIC_LSH_HAMMING` | `1` | Neighbor Hamming radius used for bounded large-vocabulary lookup. |
+| `SAGE_SEMANTIC_CANDIDATE_LIMIT` | `512` | Maximum fuzzy candidates evaluated after LSH filtering. |
+| `SAGE_SEMANTIC_FUZZY_SCAN_LIMIT` | `1000` | Vocabulary size below which exhaustive fuzzy comparison remains permitted. |
 | `SAGE_SEMANTIC_FIREWALL_ENABLED` | `true` | Enables critical-semantic preservation. |
 | `SAGE_CRITICAL_SEMANTIC_THRESHOLD` | `0.999` | Preservation threshold for high-impact semantics. |
 | `SAGE_CODEBOOK` | `global` | Active codebook namespace. |
@@ -76,6 +80,19 @@ SAGE configuration uses environment variables with the `SAGE_` prefix. Names bel
 | `SAGE_PATTERN_GC_COOLING_DAYS` | `30` | Inactivity before active vocabulary cools. |
 | `SAGE_PATTERN_GC_RETIRE_DAYS` | `90` | Inactivity before cooling vocabulary retires. |
 | `SAGE_PATTERN_NAMESPACE_PROMOTION_MIN_UTILITY` | `0.95` | Minimum utility for broader namespace promotion. |
+| `SAGE_PATTERN_TRUST_REQUIRED` | `true` | Requires trusted source evidence before promotion/activation. |
+| `SAGE_PATTERN_MIN_SOURCE_DIVERSITY` | `2` | Global lower bound for distinct source evidence. |
+| `SAGE_PATTERN_MAX_SOURCE_SHARE` | `0.75` | Maximum share of evidence attributable to one source. |
+| `SAGE_PATTERN_MIN_TRUST_SCORE` | `0.6` | Minimum weighted source trust. |
+| `SAGE_PATTERN_DEFAULT_TRUST_SCOPE` | `session` | Default learning trust scope. |
+| `SAGE_PATTERN_SESSION_MIN_SOURCES` | `2` | Distinct trusted sources required for session scope. |
+| `SAGE_PATTERN_PROJECT_MIN_SOURCES` | `3` | Distinct trusted sources required for project scope. |
+| `SAGE_PATTERN_WORKSPACE_MIN_SOURCES` | `4` | Distinct trusted sources required for workspace scope. |
+| `SAGE_PATTERN_DOMAIN_MIN_SOURCES` | `6` | Distinct trusted sources required for domain scope. |
+| `SAGE_PATTERN_FEDERATION_MIN_SOURCES` | `8` | Distinct trusted sources required for federation scope. |
+| `SAGE_CALIBRATION_BUCKETS` | `10` | Reliability calibration buckets. |
+| `SAGE_CALIBRATION_MIN_SAMPLES` | `20` | Samples before receiver calibration is treated as mature evidence. |
+| `SAGE_CALIBRATION_MAX_ECE` | `0.08` | Maximum expected calibration error allowed by activation policy. |
 
 ## Embeddings
 

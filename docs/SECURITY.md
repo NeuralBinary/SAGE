@@ -36,7 +36,7 @@ Selective resolution enforces the grant's allowed field paths. Zero-copy forward
 
 AES-GCM at-rest protection is enabled by providing a URL-safe base64 value that decodes to exactly 32 bytes through `SAGE_REF_ENCRYPTION_KEY`. Set `SAGE_REQUIRE_REF_ENCRYPTION=true` when unencrypted reference storage must be rejected.
 
-Encryption-key rotation and re-encryption are operator-controlled in v0.1.
+Encryption-key rotation and re-encryption are operator-controlled in v0.2.
 
 ## Packet and federation signatures
 

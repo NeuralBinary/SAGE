@@ -57,7 +57,7 @@ class FederationStore:
         ]
         patterns = [self.patterns.response(p) for p in self.patterns.list(namespace, status="active") if p.codebook == namespace]
         bundle: dict[str, Any] = {
-            "type": "sage-federation/0.1",
+            "type": "sage-federation/0.2",
             "source": source,
             "namespace": namespace,
             "concepts": concepts,
@@ -71,7 +71,7 @@ class FederationStore:
         return any(namespace == allowed or namespace.startswith(allowed + ".") for allowed in peer.allowed_namespaces)
 
     def import_bundle(self, bundle: dict[str, Any], *, workspace: str = "default") -> dict[str, int]:
-        if bundle.get("type") != "sage-federation/0.1":
+        if bundle.get("type") != "sage-federation/0.2":
             raise ValueError("unsupported federation bundle")
         source = str(bundle.get("source", ""))
         namespace = str(bundle.get("namespace", ""))

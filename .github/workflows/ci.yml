@@ -50,6 +50,7 @@ jobs:
     env:
       SAGE_DATABASE_URL: postgresql+psycopg://sage:ci-only-password@127.0.0.1:5432/sage
       SAGE_AUTH_REQUIRED: "false"
+      SAGE_TEST_USE_CONFIGURED_DB: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -59,6 +60,7 @@ jobs:
       - run: PYTHONPATH=src alembic upgrade head
       - run: PYTHONPATH=src alembic check
       - run: pytest -q
+      - run: sage-qualify --configured-concurrency --workers 8 --messages 20
 
   dependency-audit:
     runs-on: ubuntu-latest
@@ -84,6 +86,8 @@ jobs:
         working-directory: integrations/openclaw
       - run: npm run build
         working-directory: integrations/openclaw
+      - run: npm run tck
+        working-directory: integrations/openclaw
       - run: node --check integrations/openclaw/dist/index.js
       - run: npm pack --ignore-scripts
         working-directory: integrations/openclaw
@@ -95,8 +99,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.15.0"
       - run: python -m pip install -e '.[dev,mcp,bench,otel]'
       - run: sage-tck --json
+      - run: python scripts/conformance_matrix.py
       - run: python -c "from sage_plugin.mcp_server import build_server; assert build_server() is not None"
       - run: python -m pip wheel . --no-deps --no-build-isolation -w dist
       - run: docker build -t sage-agent-protocol:test .

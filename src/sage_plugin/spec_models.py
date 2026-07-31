@@ -5,7 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from .protocol_spec import SAGE_PROTOCOL
-from .schemas import Atom, Capabilities, Provenance
+from .schemas import Atom, Capabilities, Provenance, TraceContext
 
 
 class SpecModel(BaseModel):
@@ -13,7 +13,7 @@ class SpecModel(BaseModel):
 
 
 class ProtocolPacket(SpecModel):
-    v: Literal["sage/0.1"] = SAGE_PROTOCOL
+    v: Literal["sage/0.2"] = SAGE_PROTOCOL
     id: str | None = None
     cb: str
     sender: str | None = None
@@ -26,6 +26,7 @@ class ProtocolPacket(SpecModel):
     prov: Provenance = Field(default_factory=Provenance)
     meta: dict[str, Any] = Field(default_factory=dict)
     signature: dict[str, Any] | None = None
+    trace: TraceContext | None = None
 
 
 class ProtocolRef(SpecModel):
@@ -90,6 +91,11 @@ class ProtocolPattern(SpecModel):
     utility_score: float = 0.0
     ambiguity_score: float = Field(default=0.0, ge=0.0)
     interoperability_score: float = Field(default=1.0, ge=0.0, le=1.0)
+    calibrated_reliability: float = Field(default=1.0, ge=0.0, le=1.0)
+    trust_scope: Literal["session", "project", "workspace", "domain", "federation"] = "session"
+    source_diversity: int = Field(default=0, ge=0)
+    dominant_source_share: float = Field(default=1.0, ge=0.0, le=1.0)
+    trust_score: float = Field(default=0.0, ge=0.0, le=1.0)
     use_count: int = Field(default=0, ge=0)
     last_used_at: str | None = None
     children: list[str] = Field(default_factory=list)
@@ -97,7 +103,7 @@ class ProtocolPattern(SpecModel):
 
 
 class ProtocolCapability(SpecModel):
-    protocol: Literal["sage/0.1"] = SAGE_PROTOCOL
+    protocol: Literal["sage/0.2"] = SAGE_PROTOCOL
     capabilities: Capabilities = Field(default_factory=Capabilities)
     codebook_fingerprints: dict[str, str] = Field(default_factory=dict)
 

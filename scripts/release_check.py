@@ -6,10 +6,10 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.1.0"
-EXPECTED_RELEASE = "v0.1"
-EXPECTED_PROTOCOL = "sage/0.1"
-EXPECTED_WIRE = 1
+EXPECTED_VERSION = "0.2.0"
+EXPECTED_RELEASE = "v0.2"
+EXPECTED_PROTOCOL = "sage/0.2"
+EXPECTED_WIRE = 2
 EXPECTED_REPOSITORY = "https://github.com/NeuralBinary/SAGE"
 EXPECTED_AUTHOR = "NeuralBinary"
 EXPECTED_CREDITS = ["@NeuralBinary", "@ro0ti"]
@@ -69,7 +69,7 @@ def main() -> None:
     require(openclaw_manifest["version"] == EXPECTED_VERSION, "OpenClaw manifest version drift")
 
     hermes_yaml = (ROOT / "integrations/hermes/sage/plugin.yaml").read_text(encoding="utf-8")
-    require(re.search(r'^version:\s*["\']?0\.1\.0["\']?\s*$', hermes_yaml, re.MULTILINE) is not None, "Hermes manifest version drift")
+    require(re.search(r'^version:\s*["\']?0\.2\.0["\']?\s*$', hermes_yaml, re.MULTILINE) is not None, "Hermes manifest version drift")
 
     init_py = (ROOT / "src/sage_plugin/__init__.py").read_text(encoding="utf-8")
     protocol_py = (ROOT / "src/sage_plugin/protocol_spec.py").read_text(encoding="utf-8")
@@ -81,22 +81,28 @@ def main() -> None:
     require(tck["protocol"] == EXPECTED_PROTOCOL, "TCK protocol drift")
     require(tck["wire_version"] == EXPECTED_WIRE, "TCK wire version drift")
     require(load_json("src/sage_plugin/tck/vectors/core.json") == tck, "packaged TCK differs from repository TCK")
+    implementations = load_json("tck/implementations.json")
+    require(implementations["suite"] == "sage-tck/0.2", "TCK implementation matrix drift")
+    require(load_json("src/sage_plugin/tck/implementations.json") == implementations, "packaged TCK implementation matrix drift")
+    require({item["id"] for item in implementations["implementations"]} == {"python", "javascript"}, "TCK implementation matrix incomplete")
 
     required = [
-        "spec/SAGE-0.1.md",
-        "spec/sage-v0.1.proto",
-        "spec/schemas/wire-v1.schema.json",
-        "spec/schemas/pattern-v0.1.schema.json",
-        "src/sage_plugin/spec/SAGE-0.1.md",
-        "src/sage_plugin/spec/sage-v0.1.proto",
-        "src/sage_plugin/spec/wire-v1.schema.json",
-        "src/sage_plugin/spec/pattern-v0.1.schema.json",
+        "scripts/conformance_matrix.py",
+        "docs/THREAT_MODEL.md",
+        "spec/SAGE-0.2.md",
+        "spec/sage-v0.2.proto",
+        "spec/schemas/wire-v2.schema.json",
+        "spec/schemas/pattern-v0.2.schema.json",
+        "src/sage_plugin/spec/SAGE-0.2.md",
+        "src/sage_plugin/spec/sage-v0.2.proto",
+        "src/sage_plugin/spec/wire-v2.schema.json",
+        "src/sage_plugin/spec/pattern-v0.2.schema.json",
     ]
     for rel in required:
-        require((ROOT / rel).is_file(), f"missing required v0.1 artifact: {rel}")
+        require((ROOT / rel).is_file(), f"missing required v0.2 artifact: {rel}")
 
-    require((ROOT / "spec/SAGE-0.1.md").read_bytes() == (ROOT / "src/sage_plugin/spec/SAGE-0.1.md").read_bytes(), "packaged protocol specification drift")
-    require((ROOT / "spec/sage-v0.1.proto").read_bytes() == (ROOT / "src/sage_plugin/spec/sage-v0.1.proto").read_bytes(), "packaged protobuf binding drift")
+    require((ROOT / "spec/SAGE-0.2.md").read_bytes() == (ROOT / "src/sage_plugin/spec/SAGE-0.2.md").read_bytes(), "packaged protocol specification drift")
+    require((ROOT / "spec/sage-v0.2.proto").read_bytes() == (ROOT / "src/sage_plugin/spec/sage-v0.2.proto").read_bytes(), "packaged protobuf binding drift")
 
     repo_schemas = sorted((ROOT / "spec/schemas").glob("*.json"))
     require(repo_schemas, "no normative schemas found")
@@ -105,26 +111,27 @@ def main() -> None:
         require(packaged.is_file(), f"missing packaged schema: {schema_path.name}")
         require(schema_path.read_bytes() == packaged.read_bytes(), f"packaged schema drift: {schema_path.name}")
 
-    wire_schema = load_json("spec/schemas/wire-v1.schema.json")
+    wire_schema = load_json("spec/schemas/wire-v2.schema.json")
     require("g" in wire_schema.get("properties", {}), "wire signature field missing from schema")
-    require("e" in wire_schema.get("$defs", {}).get("WireAtomV1", {}).get("properties", {}), "wire epistemic field missing from schema")
-    require("signature" in load_json("spec/schemas/packet-v0.1.schema.json").get("properties", {}), "readable packet signature missing from schema")
+    require("z" in wire_schema.get("properties", {}), "wire trace field missing from schema")
+    require("e" in wire_schema.get("$defs", {}).get("WireAtomV2", {}).get("properties", {}), "wire epistemic field missing from schema")
+    require("signature" in load_json("spec/schemas/packet-v0.2.schema.json").get("properties", {}), "readable packet signature missing from schema")
 
     migration_files = sorted(path.name for path in (ROOT / "alembic/versions").glob("*.py") if path.name != "__init__.py")
-    require(migration_files == ["0001_sage_0_1_baseline.py"], f"unexpected migration history: {migration_files}")
+    require(migration_files == ["0001_sage_0_2_baseline.py"], f"unexpected migration history: {migration_files}")
 
     obsolete_patterns = [
-        re.compile(r"sage/0\.[2-9]"),
-        re.compile(r"\bv0\.[2-9](?:\.\d+)?\b"),
-        re.compile(r"\b0\.[2-9]\.0\b"),
-        re.compile(r"wire-v[2-9]"),
-        re.compile(r"SAGE-0\.[2-9]"),
-        re.compile(r"sage-v0\.[2-9]"),
+        re.compile(r"sage/0\.(?:1|[3-9])"),
+        re.compile(r"\bv0\.(?:1|[3-9])(?:\.\d+)?\b"),
+        re.compile(r"\b0\.(?:1|[3-9])\.0\b"),
+        re.compile(r"wire-v(?:1|[3-9])"),
+        re.compile(r"SAGE-0\.(?:1|[3-9])"),
+        re.compile(r"sage-v0\.(?:1|[3-9])"),
     ]
     prose_forbidden = re.compile(r"\b(?:example|examples|placeholder|placeholders|mock|mocks|scaffold|scaffolding|guess|guessing)\b", re.IGNORECASE)
     obsolete: list[str] = []
     prose_violations: list[str] = []
-    for scan_root in [ROOT / "src", ROOT / "spec", ROOT / "tck", ROOT / "docs", ROOT / "integrations", ROOT / "README.md", ROOT / "plugin.json", ROOT / "pyproject.toml"]:
+    for scan_root in [ROOT / "src", ROOT / "spec", ROOT / "tck", ROOT / "docs", ROOT / "integrations", ROOT / "README.md", ROOT / "VERIFICATION.md", ROOT / "plugin.json", ROOT / "pyproject.toml"]:
         for path, text in text_files(scan_root):
             rel = str(path.relative_to(ROOT))
             if any(pattern.search(text) for pattern in obsolete_patterns):

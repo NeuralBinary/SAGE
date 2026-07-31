@@ -8,15 +8,15 @@ from typing import Any, Literal
 import msgpack
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-SAGE_PROTOCOL = "sage/0.1"
-SAGE_WIRE_VERSION = 1
+SAGE_PROTOCOL = "sage/0.2"
+SAGE_WIRE_VERSION = 2
 SAGE_SUPPORTED_PROTOCOLS = (SAGE_PROTOCOL,)
 SAGE_SUPPORTED_WIRES = (SAGE_WIRE_VERSION,)
 SAGE_MEDIA_TYPE_JSON = "application/vnd.sage.packet+json"
 SAGE_MEDIA_TYPE_MSGPACK = "application/vnd.sage.packet+msgpack"
 
 
-class WireProvenanceV1(BaseModel):
+class WireProvenanceV2(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     source_ids: list[str] | None = Field(default=None, alias="s")
@@ -26,7 +26,7 @@ class WireProvenanceV1(BaseModel):
     producer: str | None = Field(default=None, alias="p")
 
 
-class WireAtomV1(BaseModel):
+class WireAtomV2(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     code: str | None = Field(default=None, alias="c")
@@ -38,7 +38,7 @@ class WireAtomV1(BaseModel):
     epistemic_type: str | None = Field(default=None, alias="e")
 
 
-class WireSignatureV1(BaseModel):
+class WireSignatureV2(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     alg: Literal["Ed25519"] = "Ed25519"
@@ -46,11 +46,17 @@ class WireSignatureV1(BaseModel):
     sig: str
 
 
-class WirePacketV1(BaseModel):
-    """Normative SAGE wire-v1 object.
+class WireTraceV2(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    Short field names are part of the frozen v1 wire contract. SAGE 0.1 is the
-    initial baseline: writers and readers MUST use wire version 1.
+    traceparent: str = Field(alias="p", pattern=r"^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$")
+    tracestate: str | None = Field(default=None, alias="s", max_length=512)
+
+
+class WirePacketV2(BaseModel):
+    """Normative SAGE wire-v2 object.
+
+    Short field names are part of the v2 wire contract. Writers and readers use wire version 2.
     """
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -61,13 +67,14 @@ class WirePacketV1(BaseModel):
     packet_id: str | None = Field(default=None, alias="i")
     sender: str | None = Field(default=None, alias="s")
     receiver: str | None = Field(default=None, alias="r")
-    atoms: list[WireAtomV1] | None = Field(default=None, alias="x")
+    atoms: list[WireAtomV2] | None = Field(default=None, alias="x")
     refs: list[str] | None = Field(default=None, alias="R")
     base: str | None = Field(default=None, alias="b")
     delta: Any | None = Field(default=None, alias="d")
-    provenance: WireProvenanceV1 = Field(default_factory=WireProvenanceV1, alias="p")
+    provenance: WireProvenanceV2 = Field(default_factory=WireProvenanceV2, alias="p")
     meta: dict[str, Any] | None = Field(default=None, alias="m")
-    signature: WireSignatureV1 | None = Field(default=None, alias="g")
+    signature: WireSignatureV2 | None = Field(default=None, alias="g")
+    trace: WireTraceV2 | None = Field(default=None, alias="z")
 
 
 def _normalized(value: Any) -> Any:
@@ -123,20 +130,20 @@ def _contains_bytes(value: Any) -> bool:
     return False
 
 
-def validate_wire_v1(value: dict[str, Any]) -> WirePacketV1:
-    packet = WirePacketV1.model_validate(value)
+def validate_wire_v2(value: dict[str, Any]) -> WirePacketV2:
+    packet = WirePacketV2.model_validate(value)
     if packet.version != SAGE_WIRE_VERSION:
         raise ValueError(f"expected wire version {SAGE_WIRE_VERSION}, got {packet.version}")
     return packet
 
 
 def wire_schema() -> dict[str, Any]:
-    return WirePacketV1.model_json_schema(by_alias=True)
+    return WirePacketV2.model_json_schema(by_alias=True)
 
 
 def conformance_error(value: dict[str, Any]) -> str | None:
     try:
-        validate_wire_v1(value)
+        validate_wire_v2(value)
         canonical_msgpack_bytes(value)
     except (ValidationError, TypeError, ValueError) as exc:
         return str(exc)

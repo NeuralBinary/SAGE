@@ -8,17 +8,17 @@ SAGE is a vendor-neutral semantic communication runtime and durable context bus 
 | Author | NeuralBinary |
 | Repository | https://github.com/NeuralBinary/SAGE |
 | Credits | @NeuralBinary, @ro0ti |
-| Version | v0.1 |
-| Package version | 0.1.0 |
-| Protocol | `sage/0.1` |
-| Wire | `1` |
+| Version | v0.2 |
+| Package version | 0.2.0 |
+| Protocol | `sage/0.2` |
+| Wire | `2` |
 | License | MIT |
 
 SAGE core is independent of model providers and agent frameworks. Native and protocol adapters connect the same runtime to Hermes, OpenClaw, Claude, OpenAI, A2A, MCP, REST, Python, and custom orchestrators.
 
 ## Design goals
 
-SAGE v0.1 is built around these invariants:
+SAGE v0.2 is built around these invariants:
 
 - Meaning required for a downstream decision is preserved before compression is optimized.
 - Critical semantics fail open to literals or references when confidence is insufficient.
@@ -29,7 +29,7 @@ SAGE v0.1 is built around these invariants:
 - Learned patterns remain compositional, inspectable, reversible, receiver-aware, and counterfactually validated.
 - SAGE semantics do not depend on MCP, A2A, a model vendor, or a hidden model state.
 - Production configuration fails closed for authentication, database selection, host policy, documentation exposure, and optional signature enforcement.
-- Protocol, package, migration, schema, adapter, and conformance metadata remain locked to v0.1 until the project version is intentionally changed.
+- Protocol, package, migration, schema, adapter, and conformance metadata remain locked to v0.2 until the project version is intentionally changed.
 
 ## Architecture
 
@@ -194,17 +194,18 @@ Forwarding a reference delegates policy to the receiver without duplicating the 
 
 ## Protocol and conformance
 
-SAGE v0.1 writes and reads only `sage/0.1`, wire `1`. The frozen protocol is in `spec/SAGE-0.1.md`. Normative JSON Schemas and the protobuf binding are under `spec/` and are packaged with the Python distribution.
+SAGE v0.2 writes and reads only `sage/0.2`, wire `2`. The frozen protocol is in `spec/SAGE-0.2.md`. Normative JSON Schemas and the protobuf binding are under `spec/` and are packaged with the Python distribution.
 
 Run the conformance checks with:
 
 ```bash
 sage-tck --json
 sage-conform --fuzz 1000
+python scripts/conformance_matrix.py
 python scripts/release_check.py
 ```
 
-The release checker enforces package metadata, author/credit metadata, protocol/wire identity, one baseline migration, schema parity, TCK parity, repository hygiene, and v0.1 consistency.
+The release checker enforces package metadata, author/credit metadata, protocol/wire identity, one baseline migration, schema parity, TCK parity, repository hygiene, and v0.2 consistency.
 
 ## A2A and MCP boundaries
 
@@ -240,7 +241,7 @@ Production defaults and validation are intentionally strict. Service credentials
 
 Optional protections include AES-GCM reference encryption and Ed25519 packet/federation signatures. Signature-required mode will not start without a verification public key.
 
-See `docs/SECURITY.md` and `docs/CONFIGURATION.md`.
+See `docs/SECURITY.md`, `docs/THREAT_MODEL.md`, and `docs/CONFIGURATION.md`.
 
 ## Observability
 
@@ -263,7 +264,7 @@ tck/                      language-neutral conformance vectors
 tests/                    behavioral and protocol tests
 integrations/             host-specific adapters
 docs/                     operations, security, patterns, configuration
-alembic/                  single v0.1 database baseline
+alembic/                  single v0.2 database baseline
 scripts/                  release, performance, schema, and verification tools
 ```
 

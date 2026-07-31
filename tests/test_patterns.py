@@ -31,6 +31,14 @@ def pattern_settings(**overrides):
         pattern_counterfactual_min_samples=1,
         pattern_utility_min_score=0.0,
         semantic_cache_enabled=False,
+        pattern_min_source_diversity=1,
+        pattern_min_trust_score=0.0,
+        pattern_max_source_share=1.0,
+        pattern_session_min_sources=1,
+        pattern_project_min_sources=1,
+        pattern_workspace_min_sources=1,
+        pattern_domain_min_sources=1,
+        pattern_federation_min_sources=1,
     )
     values.update(overrides)
     return Settings(**values)
@@ -143,7 +151,7 @@ def test_pattern_rest_surface_is_end_to_end():
     with TestClient(app) as client:
         promoted = []
         for _ in range(4):
-            response = client.post("/v1/patterns/observe", json={"content": content})
+            response = client.post("/v1/patterns/observe", json={"content": content, "source_ids": [f"source-{_}"], "source_trust": 0.9, "trust_scope": "workspace"})
             assert response.status_code == 200
             if response.json():
                 promoted = response.json()
@@ -182,7 +190,7 @@ def test_negotiation_syncs_active_pattern_definitions_and_can_disable_patterns()
     with TestClient(app) as client:
         promoted = []
         for _ in range(4):
-            promoted = client.post("/v1/patterns/observe", json={"content": content}).json() or promoted
+            promoted = client.post("/v1/patterns/observe", json={"content": content, "source_ids": [f"source-{_}"], "source_trust": 0.9, "trust_scope": "workspace"}).json() or promoted
         pattern_id = promoted[0]["pattern_id"]
         client.post(f"/v1/patterns/{pattern_id}/status", json={"status": "active"})
 
@@ -190,7 +198,7 @@ def test_negotiation_syncs_active_pattern_definitions_and_can_disable_patterns()
             "/v1/negotiate",
             json={
                 "receiver": "planner",
-                "capabilities": {"protocol_versions": ["sage/0.1"], "supports_patterns": True},
+                "capabilities": {"protocol_versions": ["sage/0.2"], "supports_patterns": True},
             },
         )
         assert negotiated.status_code == 200
@@ -202,7 +210,7 @@ def test_negotiation_syncs_active_pattern_definitions_and_can_disable_patterns()
             "/v1/negotiate",
             json={
                 "receiver": "plain-agent",
-                "capabilities": {"protocol_versions": ["sage/0.1"], "supports_patterns": False},
+                "capabilities": {"protocol_versions": ["sage/0.2"], "supports_patterns": False},
             },
         )
         assert disabled.status_code == 200

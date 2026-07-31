@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -11,6 +11,33 @@ from .compiler import normalize
 from .config import Settings
 from .db_models import Candidate, Concept, ConceptAlias
 from .embeddings import EmbeddingProvider, HashEmbeddingProvider, OpenAICompatibleEmbeddingProvider, cosine
+
+
+def lsh_bucket(vector: list[float], bits: int) -> str:
+    if not vector:
+        return "0" * ((bits + 3) // 4)
+    signs = 0
+    width = len(vector)
+    for bit in range(bits):
+        total = 0.0
+        index = bit
+        while index < width:
+            total += vector[index]
+            index += bits
+        if total >= 0.0:
+            signs |= 1 << bit
+    return f"{signs:0{(bits + 3) // 4}x}"
+
+
+def lsh_neighbors(bucket: str, bits: int, hamming: int) -> list[str]:
+    value = int(bucket, 16) if bucket else 0
+    values = {value}
+    if hamming >= 1:
+        values.update(value ^ (1 << i) for i in range(bits))
+    if hamming >= 2:
+        values.update(value ^ (1 << i) ^ (1 << j) for i in range(bits) for j in range(i + 1, bits))
+    width = (bits + 3) // 4
+    return [f"{item:0{width}x}" for item in sorted(values)]
 
 
 @dataclass(frozen=True)
@@ -116,9 +143,38 @@ class Codebook:
                 return concept
         return None
 
+    def _fuzzy_candidates(self, codebook: str, vector: list[float]) -> list[Concept]:
+        namespaces = self.namespace_chain(codebook)
+        total = int(
+            self.db.scalar(
+                select(func.count(Concept.id)).where(
+                    Concept.codebook.in_(namespaces),
+                    Concept.status == "active",
+                    Concept.embedding_space == self.embedding_space,
+                )
+            )
+            or 0
+        )
+        if total <= self.settings.semantic_fuzzy_scan_limit:
+            return self.all_chain(codebook, compatible_only=True)
+        bucket = lsh_bucket(vector, self.settings.semantic_lsh_bits)
+        buckets = lsh_neighbors(bucket, self.settings.semantic_lsh_bits, self.settings.semantic_lsh_hamming)
+        stmt = (
+            select(Concept)
+            .where(
+                Concept.codebook.in_(namespaces),
+                Concept.status == "active",
+                Concept.embedding_space == self.embedding_space,
+                Concept.lsh_bucket.in_(buckets),
+            )
+            .order_by(Concept.seen_count.desc(), Concept.id)
+            .limit(self.settings.semantic_candidate_limit)
+        )
+        return list(self.db.scalars(stmt))
+
     def nearest_similarity(self, codebook: str, canonical: str) -> float:
         vector = self.embedder.embed(normalize(canonical))
-        return max((cosine(vector, c.vector) for c in self.all_chain(codebook, compatible_only=True)), default=0.0)
+        return max((cosine(vector, c.vector) for c in self._fuzzy_candidates(codebook, vector)), default=0.0)
 
     def match(self, codebook: str, canonical: str, *, observe: bool = True) -> Match:
         canonical = normalize(canonical)
@@ -130,7 +186,7 @@ class Codebook:
         vector = self.embedder.embed(canonical)
         best: Concept | None = None
         score = 0.0
-        for concept in self.all_chain(codebook, compatible_only=True):
+        for concept in self._fuzzy_candidates(codebook, vector):
             current = cosine(vector, concept.vector)
             if current > score:
                 best, score = concept, current
@@ -154,12 +210,14 @@ class Codebook:
             self._invalidate_cache()
             return existing
         semantic_hash = hashlib.sha256(f"{canonical}\0{description}".encode()).hexdigest()
+        vector = self.embedder.embed(canonical + " " + description)
         concept = Concept(
             codebook=codebook,
             canonical=canonical,
             description=description,
             embedding_space=self.embedding_space,
-            vector=self.embedder.embed(canonical + " " + description),
+            vector=vector,
+            lsh_bucket=lsh_bucket(vector, self.settings.semantic_lsh_bits),
             semantic_hash=semantic_hash,
         )
         try:

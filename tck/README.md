@@ -1,4 +1,4 @@
-# SAGE 0.1 Technology Compatibility Kit (TCK)
+# SAGE 0.2 Technology Compatibility Kit (TCK)
 
 Run the reference implementation:
 

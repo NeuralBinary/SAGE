@@ -26,6 +26,7 @@ class Concept(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     embedding_space: Mapped[str] = mapped_column(String(256), default="hash:v1:96", index=True)
     vector: Mapped[list[float]] = mapped_column(JSON, default=list)
+    lsh_bucket: Mapped[str] = mapped_column(String(32), default="", index=True)
     seen_count: Mapped[int] = mapped_column(Integer, default=1)
     confidence: Mapped[float] = mapped_column(Float, default=1.0)
     status: Mapped[str] = mapped_column(String(32), default="active")
@@ -82,6 +83,27 @@ class PatternCandidate(Base):
     estimated_savings_bytes: Mapped[int] = mapped_column(Integer, default=0)
     semantic_variance: Mapped[float] = mapped_column(Float, default=0.0)
     slot_samples: Mapped[list[str]] = mapped_column(JSON, default=list)
+    trust_scope: Mapped[str] = mapped_column(String(32), default="session", index=True)
+    source_diversity: Mapped[int] = mapped_column(Integer, default=0)
+    dominant_source_share: Mapped[float] = mapped_column(Float, default=1.0)
+    trust_score: Mapped[float] = mapped_column(Float, default=0.0)
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class PatternSourceEvidence(Base):
+    __tablename__ = "pattern_source_evidence"
+    __table_args__ = (
+        UniqueConstraint("codebook", "signature", "source_hash", name="uq_pattern_source_evidence"),
+        Index("ix_pattern_source_signature", "codebook", "signature"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    codebook: Mapped[str] = mapped_column(String(128), index=True)
+    signature: Mapped[str] = mapped_column(String(64), index=True)
+    source_hash: Mapped[str] = mapped_column(String(64), index=True)
+    trust_score: Mapped[float] = mapped_column(Float, default=0.5)
+    observation_count: Mapped[int] = mapped_column(Integer, default=1)
     first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -118,6 +140,11 @@ class LearnedPattern(Base):
     utility_score: Mapped[float] = mapped_column(Float, default=0.0)
     ambiguity_score: Mapped[float] = mapped_column(Float, default=0.0)
     interoperability_score: Mapped[float] = mapped_column(Float, default=1.0)
+    calibrated_reliability: Mapped[float] = mapped_column(Float, default=1.0)
+    trust_scope: Mapped[str] = mapped_column(String(32), default="session", index=True)
+    source_diversity: Mapped[int] = mapped_column(Integer, default=0)
+    dominant_source_share: Mapped[float] = mapped_column(Float, default=1.0)
+    trust_score: Mapped[float] = mapped_column(Float, default=0.0)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cooling_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -138,6 +165,26 @@ class LearnedPattern(Base):
         if self.shadow_samples <= 0:
             return None
         return self.shadow_success_sum / self.shadow_samples
+
+
+class CalibrationBucket(Base):
+    __tablename__ = "calibration_buckets"
+    __table_args__ = (
+        UniqueConstraint("workspace", "receiver", "model", "task_family", "bucket", name="uq_calibration_bucket"),
+        Index("ix_calibration_lookup", "workspace", "receiver", "model", "task_family"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workspace: Mapped[str] = mapped_column(String(128), default="default", index=True)
+    receiver: Mapped[str] = mapped_column(String(128), default="*", index=True)
+    model: Mapped[str] = mapped_column(String(256), default="*", index=True)
+    task_family: Mapped[str] = mapped_column(String(128), default="*", index=True)
+    bucket: Mapped[int] = mapped_column(Integer)
+    sample_count: Mapped[int] = mapped_column(Integer, default=0)
+    predicted_sum: Mapped[float] = mapped_column(Float, default=0.0)
+    observed_sum: Mapped[float] = mapped_column(Float, default=0.0)
+    squared_error_sum: Mapped[float] = mapped_column(Float, default=0.0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
 class Reference(Base):

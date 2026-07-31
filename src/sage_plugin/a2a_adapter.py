@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from .protocol_spec import SAGE_MEDIA_TYPE_JSON, SAGE_PROTOCOL, SAGE_SUPPORTED_PROTOCOLS, validate_wire_v1
+from .protocol_spec import SAGE_MEDIA_TYPE_JSON, SAGE_PROTOCOL, SAGE_SUPPORTED_PROTOCOLS, SAGE_WIRE_VERSION, validate_wire_v2
 
 SAGE_EXTENSION_URI = "urn:uuid:f81af17b-cc6a-5cdf-8a0f-51116b2e6a8d"
 SAGE_MEDIA_TYPE = SAGE_MEDIA_TYPE_JSON
@@ -16,7 +16,7 @@ def pack_data_part(wire: dict[str, Any]) -> dict[str, Any]:
     A2A owns Message/Task lifecycle. SAGE is only the structured data carried by a
     Part, which keeps the semantic protocol independent of an A2A SDK or binding.
     """
-    validate_wire_v1(wire)
+    validate_wire_v2(wire)
     return {
         "data": {"sageProtocol": SAGE_PROTOCOL, "wire": wire},
         "mediaType": SAGE_MEDIA_TYPE,
@@ -38,7 +38,7 @@ def unpack_data_part(part: dict[str, Any]) -> dict[str, Any]:
     wire = data.get("wire")
     if not isinstance(wire, dict):
         raise ValueError("A2A DataPart does not contain a SAGE wire packet")
-    validate_wire_v1(wire)
+    validate_wire_v2(wire)
     return wire
 
 
@@ -91,7 +91,7 @@ def agent_card_extension() -> dict[str, Any]:
         "params": {
             "mediaType": SAGE_MEDIA_TYPE,
             "protocolVersions": list(SAGE_SUPPORTED_PROTOCOLS),
-            "wireVersion": 1,
+            "wireVersion": SAGE_WIRE_VERSION,
         },
     }
 
@@ -126,7 +126,7 @@ def agent_card(
         {
             "id": "sage-semantic-handoff",
             "name": "SAGE semantic handoff",
-            "description": "Exchange SAGE 0.1 structured semantic payloads with peer agents.",
+            "description": "Exchange SAGE 0.2 structured semantic payloads with peer agents.",
             "tags": ["sage", "semantic-context", "agent-handoff"],
             "inputModes": input_modes,
             "outputModes": output_modes,

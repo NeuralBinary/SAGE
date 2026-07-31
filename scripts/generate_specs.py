@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from sage_plugin.protocol_spec import WirePacketV1
+from sage_plugin.protocol_spec import WirePacketV2
 from sage_plugin.spec_models import SPEC_MODELS
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,12 +19,12 @@ def main() -> None:
     packaged = ROOT / "src" / "sage_plugin" / "spec"
     for name, model in SPEC_MODELS.items():
         payload = model.model_json_schema()
-        filename = f"{name}-v0.1.schema.json"
+        filename = f"{name}-v0.2.schema.json"
         dump(repo / filename, payload)
         dump(packaged / filename, payload)
-    wire = WirePacketV1.model_json_schema(by_alias=True)
-    dump(repo / "wire-v1.schema.json", wire)
-    dump(packaged / "wire-v1.schema.json", wire)
+    wire = WirePacketV2.model_json_schema(by_alias=True)
+    dump(repo / "wire-v2.schema.json", wire)
+    dump(packaged / "wire-v2.schema.json", wire)
 
 
 if __name__ == "__main__":

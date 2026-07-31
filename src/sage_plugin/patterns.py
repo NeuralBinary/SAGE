@@ -8,14 +8,15 @@ from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from .calibration import CalibrationStore
 from .codebook import Codebook
 from .compiler import SemanticUnit, normalize
 from .config import Settings
-from .db_models import Concept, LearnedPattern, PatternCandidate, PatternEdge, PatternReceiverMetric
+from .db_models import Concept, LearnedPattern, PatternCandidate, PatternEdge, PatternReceiverMetric, PatternSourceEvidence
 
 
 @dataclass(frozen=True)
@@ -125,6 +126,7 @@ class PatternStore:
         self.db = db
         self.settings = settings
         self.codebook = codebook or Codebook(db, settings)
+        self.calibration = CalibrationStore(db, settings.calibration_buckets, settings.calibration_min_samples)
 
     def _candidate_windows(self, units: list[SemanticUnit]) -> list[list[SemanticUnit]]:
         if len(units) < self.settings.pattern_min_components:
@@ -138,7 +140,15 @@ class PatternStore:
                     return out
         return out
 
-    def observe_units(self, codebook: str, units: list[SemanticUnit]) -> list[LearnedPattern]:
+    def observe_units(
+        self,
+        codebook: str,
+        units: list[SemanticUnit],
+        *,
+        source_ids: list[str] | None = None,
+        trust_score: float = 0.5,
+        trust_scope: str | None = None,
+    ) -> list[LearnedPattern]:
         if not self.settings.pattern_learning_enabled:
             return []
         promoted: list[LearnedPattern] = []
@@ -152,16 +162,33 @@ class PatternStore:
             if signature in seen_signatures:
                 continue
             seen_signatures.add(signature)
-            item = self.observe(codebook, composition, slot_fingerprint(window, composition))
+            item = self.observe(
+                codebook,
+                composition,
+                slot_fingerprint(window, composition),
+                source_ids=source_ids,
+                trust_score=trust_score,
+                trust_scope=trust_scope,
+            )
             if item is not None:
                 promoted.append(item)
         if self.settings.pattern_recursive_learning_enabled:
-            recursive = self._observe_recursive(codebook, units)
+            recursive = self._observe_recursive(
+                codebook, units, source_ids=source_ids, trust_score=trust_score, trust_scope=trust_scope
+            )
             if recursive is not None:
                 promoted.append(recursive)
         return promoted
 
-    def _observe_recursive(self, codebook: str, units: list[SemanticUnit]) -> LearnedPattern | None:
+    def _observe_recursive(
+        self,
+        codebook: str,
+        units: list[SemanticUnit],
+        *,
+        source_ids: list[str] | None = None,
+        trust_score: float = 0.5,
+        trust_scope: str | None = None,
+    ) -> LearnedPattern | None:
         matches = self.active_matches(codebook, units)
         if len(matches) < 2:
             return None
@@ -178,8 +205,129 @@ class PatternStore:
                 codebook, composition, slot_fingerprint(span, composition),
                 relation_structure={"paths": [item.get("path") for item in composition], "children": children, "recursive": True},
                 signature_override=signature,
+                source_ids=source_ids,
+                trust_score=trust_score,
+                trust_scope=trust_scope,
             )
         return None
+
+    @staticmethod
+    def _source_hash(source_id: str) -> str:
+        return hashlib.sha256(source_id.encode("utf-8")).hexdigest()
+
+    def _record_source_evidence(
+        self,
+        codebook: str,
+        signature: str,
+        source_ids: list[str] | None,
+        trust_score: float,
+    ) -> tuple[int, float, float]:
+        unique_sources = sorted({item.strip() for item in (source_ids or []) if item and item.strip()})
+        if not unique_sources:
+            unique_sources = ["anonymous"]
+        trust_score = max(0.0, min(1.0, trust_score))
+        dialect = self.db.get_bind().dialect.name
+        table = PatternSourceEvidence.__table__
+        for source_id in unique_sources:
+            source_hash = self._source_hash(source_id)
+            values = {
+                "codebook": codebook,
+                "signature": signature,
+                "source_hash": source_hash,
+                "trust_score": trust_score,
+                "observation_count": 1,
+            }
+            if dialect == "postgresql":
+                from sqlalchemy.dialects.postgresql import insert
+
+                stmt = insert(table).values(**values)
+                stmt = stmt.on_conflict_do_update(
+                    constraint="uq_pattern_source_evidence",
+                    set_={
+                        "observation_count": table.c.observation_count + 1,
+                        "trust_score": case(
+                            (stmt.excluded.trust_score > table.c.trust_score, stmt.excluded.trust_score),
+                            else_=table.c.trust_score,
+                        ),
+                    },
+                )
+                self.db.execute(stmt)
+            elif dialect == "sqlite":
+                from sqlalchemy.dialects.sqlite import insert
+
+                stmt = insert(table).values(**values)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=[table.c.codebook, table.c.signature, table.c.source_hash],
+                    set_={
+                        "observation_count": table.c.observation_count + 1,
+                        "trust_score": case(
+                            (stmt.excluded.trust_score > table.c.trust_score, stmt.excluded.trust_score),
+                            else_=table.c.trust_score,
+                        ),
+                    },
+                )
+                self.db.execute(stmt)
+            else:
+                item = self.db.scalar(
+                    select(PatternSourceEvidence).where(
+                        PatternSourceEvidence.codebook == codebook,
+                        PatternSourceEvidence.signature == signature,
+                        PatternSourceEvidence.source_hash == source_hash,
+                    )
+                )
+                if item is None:
+                    item = PatternSourceEvidence(**values)
+                    try:
+                        with self.db.begin_nested():
+                            self.db.add(item)
+                            self.db.flush()
+                    except IntegrityError:
+                        item = self.db.scalar(
+                            select(PatternSourceEvidence).where(
+                                PatternSourceEvidence.codebook == codebook,
+                                PatternSourceEvidence.signature == signature,
+                                PatternSourceEvidence.source_hash == source_hash,
+                            )
+                        )
+                        if item is None:
+                            raise
+                        item.observation_count += 1
+                        item.trust_score = max(item.trust_score, trust_score)
+                else:
+                    item.observation_count += 1
+                    item.trust_score = max(item.trust_score, trust_score)
+        self.db.flush()
+        rows = list(
+            self.db.scalars(
+                select(PatternSourceEvidence).where(
+                    PatternSourceEvidence.codebook == codebook,
+                    PatternSourceEvidence.signature == signature,
+                )
+            )
+        )
+        total = sum(row.observation_count for row in rows)
+        dominant = max((row.observation_count for row in rows), default=0) / max(1, total)
+        weighted_trust = (
+            sum(row.trust_score * row.observation_count for row in rows) / total if total else 0.0
+        )
+        return len(rows), dominant, weighted_trust
+
+    def _trust_ready(self, diversity: int, dominant_share: float, trust_score: float, scope: str = "session") -> bool:
+        if not self.settings.pattern_trust_required:
+            return True
+        scope_minimums = {
+            "session": self.settings.pattern_session_min_sources,
+            "project": self.settings.pattern_project_min_sources,
+            "workspace": self.settings.pattern_workspace_min_sources,
+            "domain": self.settings.pattern_domain_min_sources,
+            "federation": self.settings.pattern_federation_min_sources,
+        }
+        minimum_sources = max(self.settings.pattern_min_source_diversity, scope_minimums.get(scope, scope_minimums["session"]))
+        return (
+            diversity >= minimum_sources
+            and dominant_share <= self.settings.pattern_max_source_share
+            and trust_score >= self.settings.pattern_min_trust_score
+        )
 
     def observe(
         self,
@@ -189,10 +337,17 @@ class PatternStore:
         *,
         relation_structure: dict[str, Any] | None = None,
         signature_override: str | None = None,
+        source_ids: list[str] | None = None,
+        trust_score: float = 0.5,
+        trust_scope: str | None = None,
     ) -> LearnedPattern | None:
         if len(composition) < self.settings.pattern_min_components:
             return None
         signature = signature_override or pattern_signature(composition)
+        scope = trust_scope or self.settings.pattern_default_trust_scope
+        diversity, dominant_share, weighted_trust = self._record_source_evidence(
+            codebook, signature, source_ids, trust_score
+        )
         existing = self.db.scalar(
             select(LearnedPattern).where(
                 LearnedPattern.codebook == codebook,
@@ -208,49 +363,123 @@ class PatternStore:
                     1.0,
                     (len(set(existing.slot_samples)) - 1) / (existing.occurrence_count - 1),
                 )
+            existing.source_diversity = diversity
+            existing.dominant_source_share = dominant_share
+            existing.trust_score = weighted_trust
+            existing.trust_scope = scope
             return existing
 
-        stmt = select(PatternCandidate).where(
+        candidate_stmt = select(PatternCandidate).where(
             PatternCandidate.codebook == codebook,
             PatternCandidate.signature == signature,
         )
-        candidate = self.db.scalar(stmt)
         savings = estimated_savings(composition)
-        if candidate is None:
-            candidate = PatternCandidate(
-                codebook=codebook,
-                signature=signature,
-                canonical=canonical_label(composition),
-                composition=composition,
-                relation_structure=relation_structure or {"paths": [item.get("path") for item in composition]},
-                occurrence_count=1,
-                estimated_savings_bytes=savings,
-                slot_samples=[slot_sample] if slot_sample else [],
+        values = {
+            "codebook": codebook,
+            "signature": signature,
+            "canonical": canonical_label(composition),
+            "composition": composition,
+            "relation_structure": relation_structure or {"paths": [item.get("path") for item in composition]},
+            "occurrence_count": 1,
+            "estimated_savings_bytes": savings,
+            "slot_samples": [slot_sample] if slot_sample else [],
+            "trust_scope": scope,
+            "source_diversity": diversity,
+            "dominant_source_share": dominant_share,
+            "trust_score": weighted_trust,
+        }
+        dialect = self.db.get_bind().dialect.name
+        table = PatternCandidate.__table__
+        if dialect == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert
+
+            upsert = insert(table).values(**values)
+            upsert = upsert.on_conflict_do_update(
+                constraint="uq_pattern_candidate_signature",
+                set_={
+                    "occurrence_count": table.c.occurrence_count + 1,
+                    "estimated_savings_bytes": table.c.estimated_savings_bytes + savings,
+                    "trust_scope": scope,
+                    "source_diversity": diversity,
+                    "dominant_source_share": dominant_share,
+                    "trust_score": weighted_trust,
+                },
             )
-            try:
-                with self.db.begin_nested():
-                    self.db.add(candidate)
-                    self.db.flush()
-            except IntegrityError:
-                candidate = self.db.scalar(stmt)
-                if candidate is None:
-                    raise
+            self.db.execute(upsert)
+        elif dialect == "sqlite":
+            from sqlalchemy.dialects.sqlite import insert
+
+            upsert = insert(table).values(**values)
+            upsert = upsert.on_conflict_do_update(
+                index_elements=[table.c.codebook, table.c.signature],
+                set_={
+                    "occurrence_count": table.c.occurrence_count + 1,
+                    "estimated_savings_bytes": table.c.estimated_savings_bytes + savings,
+                    "trust_scope": scope,
+                    "source_diversity": diversity,
+                    "dominant_source_share": dominant_share,
+                    "trust_score": weighted_trust,
+                },
+            )
+            self.db.execute(upsert)
+        else:
+            candidate = self.db.scalar(candidate_stmt)
+            if candidate is None:
+                candidate = PatternCandidate(**values)
+                try:
+                    with self.db.begin_nested():
+                        self.db.add(candidate)
+                        self.db.flush()
+                except IntegrityError:
+                    candidate = self.db.scalar(candidate_stmt)
+                    if candidate is None:
+                        raise
+                    candidate.occurrence_count += 1
+                    candidate.estimated_savings_bytes += savings
+            else:
                 candidate.occurrence_count += 1
                 candidate.estimated_savings_bytes += savings
-        else:
-            candidate.occurrence_count += 1
-            candidate.estimated_savings_bytes += savings
+
+        candidate = self.db.scalar(candidate_stmt.with_for_update())
+        if candidate is None:
+            existing = self.db.scalar(
+                select(LearnedPattern).where(
+                    LearnedPattern.codebook == codebook,
+                    LearnedPattern.signature == signature,
+                )
+            )
+            return existing
+        concurrent_pattern = self.db.scalar(
+            select(LearnedPattern).where(
+                LearnedPattern.codebook == codebook,
+                LearnedPattern.signature == signature,
+            )
+        )
+        if concurrent_pattern is not None:
+            self.db.delete(candidate)
+            concurrent_pattern.occurrence_count += 1
+            concurrent_pattern.source_diversity = diversity
+            concurrent_pattern.dominant_source_share = dominant_share
+            concurrent_pattern.trust_score = weighted_trust
+            concurrent_pattern.trust_scope = scope
+            self.db.flush()
+            return concurrent_pattern
 
         if slot_sample and slot_sample not in candidate.slot_samples:
             candidate.slot_samples = (list(candidate.slot_samples) + [slot_sample])[-64:]
         if candidate.occurrence_count > 1 and candidate.slot_samples:
             candidate.semantic_variance = min(1.0, (len(set(candidate.slot_samples)) - 1) / (candidate.occurrence_count - 1))
+        candidate.trust_scope = scope
+        candidate.source_diversity = diversity
+        candidate.dominant_source_share = dominant_share
+        candidate.trust_score = weighted_trust
 
         candidate_score = math.log1p(candidate.occurrence_count) * (candidate.estimated_savings_bytes / 64.0) * max(0.05, 1.0 - candidate.semantic_variance)
         if (
             candidate.occurrence_count >= self.settings.pattern_candidate_min_count
             and candidate.estimated_savings_bytes >= self.settings.pattern_min_savings_bytes
             and candidate_score >= self.settings.pattern_utility_min_score
+            and self._trust_ready(candidate.source_diversity, candidate.dominant_source_share, candidate.trust_score, candidate.trust_scope)
         ):
             return self._promote_candidate(candidate)
         return None
@@ -290,6 +519,11 @@ class PatternStore:
             status="shadow",
             ambiguity_score=candidate.semantic_variance,
             interoperability_score=1.0,
+            calibrated_reliability=1.0,
+            trust_scope=candidate.trust_scope,
+            source_diversity=candidate.source_diversity,
+            dominant_source_share=candidate.dominant_source_share,
+            trust_score=candidate.trust_score,
         )
         try:
             with self.db.begin_nested():
@@ -396,10 +630,11 @@ class PatternStore:
         receiver: str | None = None,
         model: str | None = None,
         workspace: str = "default",
+        task_family: str = "*",
     ) -> list[PatternMatch]:
         raw = self.matches(codebook, units, statuses={"active"})
         if receiver or model:
-            raw = [m for m in raw if self.receiver_fidelity(m.pattern, receiver or "*", model or "*", workspace) >= self.settings.pattern_receiver_min_fidelity]
+            raw = [m for m in raw if self.receiver_fidelity(m.pattern, receiver or "*", model or "*", workspace, task_family) >= self.settings.pattern_receiver_min_fidelity]
         raw.sort(key=lambda m: (m.start, -(m.end - m.start), -self.utility_score(m.pattern), -m.pattern.estimated_savings_bytes))
         selected: list[PatternMatch] = []
         occupied: set[int] = set()
@@ -432,17 +667,26 @@ class PatternStore:
             PatternReceiverMetric.model == model,
         ))
 
-    def receiver_fidelity(self, pattern: LearnedPattern, receiver: str, model: str, workspace: str = "default") -> float:
+    def receiver_fidelity(
+        self,
+        pattern: LearnedPattern,
+        receiver: str,
+        model: str,
+        workspace: str = "default",
+        task_family: str = "*",
+    ) -> float:
         exact = self.receiver_metric(pattern, receiver, model, workspace)
         fallback = self.receiver_metric(pattern, "*", "*", workspace)
         metric = exact or fallback
-        if metric is None or metric.sample_count <= 0:
-            return 1.0
-        return metric.fidelity_sum / metric.sample_count
+        raw = 1.0 if metric is None or metric.sample_count <= 0 else metric.fidelity_sum / metric.sample_count
+        calibrated = self.calibration.calibrated_probability(
+            raw, workspace=workspace, receiver=receiver, model=model, task_family=task_family
+        )
+        return min(raw, calibrated)
 
     def record_counterfactual(
         self, pattern_id: str, *, full_success: float, compressed_success: float, semantic_fidelity: float,
-        receiver: str = "*", model: str = "*", workspace: str = "default",
+        receiver: str = "*", model: str = "*", task_family: str = "*", workspace: str = "default",
     ) -> LearnedPattern:
         pattern = self.get(pattern_id)
         if pattern is None:
@@ -459,6 +703,19 @@ class PatternStore:
         if abs(full_success - compressed_success) <= 1e-9 and semantic_fidelity >= self.settings.pattern_counterfactual_min_fidelity:
             metric.exact_equivalence_count += 1
         metric.last_seen_at = datetime.now(timezone.utc)
+        equivalent = 1.0 if abs(full_success - compressed_success) <= 1e-9 and semantic_fidelity >= self.settings.pattern_counterfactual_min_fidelity else 0.0
+        self.calibration.record(
+            predicted=semantic_fidelity,
+            observed=equivalent,
+            workspace=workspace,
+            receiver=receiver,
+            model=model,
+            task_family=task_family,
+        )
+        report = self.calibration.report(
+            semantic_fidelity, workspace=workspace, receiver=receiver, model=model, task_family=task_family
+        )
+        pattern.calibrated_reliability = report.calibrated_probability
         all_metrics = list(self.db.scalars(select(PatternReceiverMetric).where(PatternReceiverMetric.pattern_id == pattern.id)))
         total = sum(m.sample_count for m in all_metrics)
         fidelity = sum(m.fidelity_sum for m in all_metrics) / total if total else 0.0
@@ -468,7 +725,12 @@ class PatternStore:
             avg_fidelity = metric.fidelity_sum / metric.sample_count
             full_avg = metric.full_success_sum / metric.sample_count
             compressed_avg = metric.compressed_success_sum / metric.sample_count
-            if avg_fidelity >= self.settings.pattern_counterfactual_min_fidelity and compressed_avg + 1e-9 >= full_avg:
+            if (
+                avg_fidelity >= self.settings.pattern_counterfactual_min_fidelity
+                and compressed_avg + 1e-9 >= full_avg
+                and self._trust_ready(pattern.source_diversity, pattern.dominant_source_share, pattern.trust_score, pattern.trust_scope)
+                and report.expected_calibration_error <= self.settings.calibration_max_ece
+            ):
                 pattern.status = "active" if self.settings.pattern_auto_activate else "validated"
                 pattern.version += 1
                 concept = self.db.get(Concept, pattern.concept_id)
@@ -508,6 +770,9 @@ class PatternStore:
             estimated_savings_bytes=source.estimated_savings_bytes, semantic_variance=source.semantic_variance,
             slot_samples=source.slot_samples, confidence=source.confidence, status="shadow", ambiguity_score=source.ambiguity_score,
             interoperability_score=source.interoperability_score, utility_score=source.utility_score,
+            calibrated_reliability=source.calibrated_reliability, trust_scope=target_codebook,
+            source_diversity=source.source_diversity, dominant_source_share=source.dominant_source_share,
+            trust_score=source.trust_score,
         )
         self.db.add(promoted)
         self.db.flush()
@@ -589,6 +854,8 @@ class PatternStore:
         pattern = self.get(pattern_id)
         if pattern is None:
             raise KeyError(pattern_id)
+        if status == "active" and not self._trust_ready(pattern.source_diversity, pattern.dominant_source_share, pattern.trust_score, pattern.trust_scope):
+            raise ValueError("pattern trust evidence is insufficient for activation")
         if pattern.status != status:
             pattern.status = status
             pattern.version += 1
@@ -621,6 +888,11 @@ class PatternStore:
             "utility_score": self.utility_score(pattern),
             "ambiguity_score": pattern.ambiguity_score,
             "interoperability_score": pattern.interoperability_score,
+            "calibrated_reliability": pattern.calibrated_reliability,
+            "trust_scope": pattern.trust_scope,
+            "source_diversity": pattern.source_diversity,
+            "dominant_source_share": pattern.dominant_source_share,
+            "trust_score": pattern.trust_score,
             "use_count": pattern.use_count,
             "last_used_at": pattern.last_used_at.isoformat() if pattern.last_used_at else None,
             "children": list((pattern.relation_structure or {}).get("children") or []),

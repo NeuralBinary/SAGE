@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sage-agent-protocol"
-version = "0.1.0"
+version = "0.2.0"
 description = "SAGE: secure vendor-neutral semantic communication runtime for AI agents"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -54,6 +54,7 @@ sage-tck = "sage_plugin.conformance:main"
 sage-conform = "sage_plugin.conformance:main"
 sage-inspect = "sage_plugin.inspect_cli:main"
 sage-bench = "sage_plugin.economics:main"
+sage-qualify = "sage_plugin.qualification:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -77,4 +78,4 @@ strict = true
 warn_unused_ignores = true
 
 [tool.setuptools.package-data]
-sage_plugin = ["spec/*", "tck/vectors/*.json"]
+sage_plugin = ["spec/*", "tck/*.json", "tck/vectors/*.json"]

@@ -1,5 +1,5 @@
 name: sage
-version: "0.1.0"
+version: "0.2.0"
 description: Vendor-neutral SAGE semantic bus, context injection, handoff, and memory tools.
 requires_env:
   - SAGE_URL
