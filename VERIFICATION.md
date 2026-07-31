@@ -9,7 +9,7 @@
 | Repository | https://github.com/NeuralBinary/SAGE |
 | Credits | @NeuralBinary, @ro0ti |
 | Public version | v0.2 |
-| Package version | 0.2.0 |
+| Package version | 0.2.1 |
 | Protocol | sage/0.2 |
 | Wire | 2 |
 | Database baseline | 0001_sage_0_2 |
@@ -52,7 +52,9 @@ Implemented capabilities include:
 
 ## Functional qualification
 
-The final working tree contains 97 automated tests. The full suite passes.
+The final working tree contains 102 automated tests. The full suite passes.
+
+The Hermes adapter regression coverage requires `sage_handoff.content` to be a structured JSON object, accepts a defensively parsed JSON-object string, rejects plain text, and rejects already-encoded SAGE semantic envelopes before they can be encoded again.
 
 Coverage includes transport encode/decode, durable handoff/claim/ACK/NACK, lease recovery, partition claims, ordering, idempotency, quotas, backpressure, identity-scoped authorization, semantic memory, contradictions, causal invalidation, information-flow labels, content-addressed references, selective disclosure, zero-copy forwarding, immutable states, checkpoints, reachability cleanup, concepts, learned patterns, source trust, holdout validation, counterfactual validation, receiver calibration, drift handling, semantic safety, signatures, federation, pub/sub, routing, A2A, economics, Inspector output, adapter-facing delivery, configuration validation, HTTP limits, W3C trace context, serialization properties, state patch properties, concurrency, codebook releases, Merkle synchronization, and bounded large-vocabulary lookup.
 
@@ -211,7 +213,7 @@ The PostgreSQL CI job uses PostgreSQL 18 with configured-database mode and runs 
 
 ## API and protocol artifacts
 
-The FastAPI OpenAPI document builds as OpenAPI 3.1.0 with 81 paths, title `SAGE`, and version 0.2.0.
+The FastAPI OpenAPI document builds as OpenAPI 3.1.0 with 81 paths, title `SAGE`, and version 0.2.1.
 
 Normative JSON Schemas, protobuf binding, Markdown protocol specification, generated TypeScript/Go wire metadata, and TCK artifacts are generated or checked from the frozen v0.2 protocol model. The installed Python package mirrors the repository hierarchy under `sage_plugin/spec/schemas/`.
 
@@ -231,11 +233,11 @@ References use SHA-256 content identity while grants carry access, selective-fie
 
 ## Distribution qualification
 
-The Python wheel builds as `sage_agent_protocol-0.2.0-py3-none-any.whl`. `scripts/package_check.py` verifies package metadata, author, Hermes entry point, protocol specification, protobuf binding, nested JSON Schemas, TCK implementation matrix, and TCK vectors directly from the wheel archive.
+The Python wheel builds as `sage_agent_protocol-0.2.1-py3-none-any.whl`. `scripts/package_check.py` verifies package metadata, author, Hermes entry point, protocol specification, protobuf binding, nested JSON Schemas, TCK implementation matrix, and TCK vectors directly from the wheel archive.
 
-The wheel installs into an isolated target, imports as 0.2.0 with author NeuralBinary, exposes `sage = sage_plugin.hermes_plugin`, contains all 11 normative JSON Schemas under `sage_plugin/spec/schemas/`, and passes 13/13 TCK vectors plus 250/250 malformed-wire checks from the installed package.
+The wheel installs into an isolated target, imports as 0.2.1 with author NeuralBinary, exposes `sage = sage_plugin.hermes_plugin`, contains all 11 normative JSON Schemas under `sage_plugin/spec/schemas/`, and passes 13/13 TCK vectors plus 250/250 malformed-wire checks from the installed package.
 
-The OpenClaw archive builds as `@sage-agent/openclaw-sage@0.2.0`. `scripts/package_check.py` verifies its metadata, author, credits, plugin manifest, runtime, conformance runner, and TCK content. The packed JavaScript runtime and conformance runner pass syntax checking and its independent TCK passes 13/13 vectors.
+The OpenClaw archive builds as `@sage-agent/openclaw-sage@0.2.1`. `scripts/package_check.py` verifies its metadata, author, credits, plugin manifest, runtime, conformance runner, and TCK content. The packed JavaScript runtime and conformance runner pass syntax checking and its independent TCK passes 13/13 vectors.
 
 ## Reproducibility and release policy
 
@@ -257,7 +259,7 @@ All locally executable v0.2 functional, protocol, semantic-safety, security, mig
 
 ## Source archive qualification
 
-The deterministic source ZIP is extracted into a separate directory and qualified independently from the working tree. The archive-level run passes the release, security, architecture, invariant, generated-schema, and generated-protocol checks. It passes all 97 automated tests, all 13 Python TCK vectors, all 13 JavaScript TCK vectors, all 13 Go TCK vectors, 250/250 malformed-wire mutations, and 1,000 differential cross-runtime comparisons.
+The deterministic source ZIP is extracted into a separate directory and qualified independently from the working tree. The archive-level run passes the release, security, architecture, invariant, generated-schema, and generated-protocol checks. It passes all 102 automated tests, all 13 Python TCK vectors, all 13 JavaScript TCK vectors, all 13 Go TCK vectors, 250/250 malformed-wire mutations, and 1,000 differential cross-runtime comparisons.
 
 A fresh database built from the extracted source reaches `0001_sage_0_2 (head)` and `alembic check` reports no new upgrade operations. OpenAPI builds as 3.1.0 with 81 paths.
 

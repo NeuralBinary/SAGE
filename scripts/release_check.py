@@ -6,7 +6,7 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.2.0"
+EXPECTED_VERSION = "0.2.1"
 EXPECTED_RELEASE = "v0.2"
 EXPECTED_PROTOCOL = "sage/0.2"
 EXPECTED_WIRE = 2
@@ -69,7 +69,7 @@ def main() -> None:
     require(openclaw_manifest["version"] == EXPECTED_VERSION, "OpenClaw manifest version drift")
 
     hermes_yaml = (ROOT / "integrations/hermes/sage/plugin.yaml").read_text(encoding="utf-8")
-    require(re.search(r'^version:\s*["\']?0\.2\.0["\']?\s*$', hermes_yaml, re.MULTILINE) is not None, "Hermes manifest version drift")
+    require(re.search(r'^version:\s*["\']?0\.2\.1["\']?\s*$', hermes_yaml, re.MULTILINE) is not None, "Hermes manifest version drift")
 
     init_py = (ROOT / "src/sage_plugin/__init__.py").read_text(encoding="utf-8")
     protocol_py = (ROOT / "src/sage_plugin/protocol_spec.py").read_text(encoding="utf-8")

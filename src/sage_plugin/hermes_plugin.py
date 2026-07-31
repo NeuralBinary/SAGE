@@ -40,12 +40,25 @@ def _session_key(kwargs: dict[str, Any]) -> str:
 def register(ctx: Any) -> None:
     handoff_schema = {
         "name": "sage_handoff",
-        "description": "Send a compact durable semantic handoff to another agent, regardless of model/provider.",
+        "description": (
+            "Send raw structured application-level facts or state to another agent through SAGE. "
+            "content must be a JSON object containing only what the receiver should know. "
+            "Do not serialize content to text and do not construct SAGE literals, concepts, "
+            "paths, provenance, references, packets, or other protocol structures. "
+            "SAGE performs semantic encoding automatically."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
                 "receiver": {"type": "string"},
-                "content": {},
+                "content": {
+                    "type": "object",
+                    "description": (
+                        "Raw application-level JSON object for the receiver. "
+                        "Do not pass serialized JSON or SAGE protocol structures."
+                    ),
+                    "additionalProperties": True,
+                },
                 "correlation_id": {"type": "string"},
                 "priority": {"type": "integer"},
                 "budget_tokens": {"type": "integer"},
@@ -55,10 +68,35 @@ def register(ctx: Any) -> None:
     }
 
     def handoff(params: dict[str, Any], **_: Any) -> str:
+        content = params["content"]
+
+        if isinstance(content, str):
+            try:
+                content = json.loads(content)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    "sage_handoff.content must be a JSON object, not plain text"
+                ) from exc
+
+        if not isinstance(content, dict):
+            raise ValueError("sage_handoff.content must be a JSON object")
+
+        sage_envelope_keys = {
+            "concepts",
+            "literals",
+            "references",
+            "provenance",
+        }
+        if sage_envelope_keys.issubset(content):
+            raise ValueError(
+                "sage_handoff.content appears to be an encoded SAGE semantic "
+                "envelope; pass raw application-level fields instead"
+            )
+
         payload = {
             "receiver": params["receiver"],
             "sender": _AGENT,
-            "content": params["content"],
+            "content": content,
             "workspace": _WORKSPACE,
             "correlation_id": params.get("correlation_id"),
             "priority": params.get("priority", 0),
