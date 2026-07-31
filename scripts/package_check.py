@@ -11,7 +11,7 @@ import zipfile
 from email.parser import Parser
 from pathlib import Path, PurePosixPath
 
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 AUTHOR = "NeuralBinary"
 SOURCE_PREFIX = f"sage-plugin-v{VERSION}/"
 HERMES_PREFIX = f"sage-hermes-plugin-v{VERSION}/"

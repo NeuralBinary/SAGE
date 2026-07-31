@@ -38,4 +38,4 @@ quickstart:
 	./quickstart.sh
 release:
 	python scripts/build_release.py --output dist
-	python scripts/package_check.py --source dist/sage-plugin-v0.2.1.zip --wheel dist/sage_agent_protocol-0.2.1-py3-none-any.whl --hermes dist/sage-hermes-plugin-v0.2.1.zip --openclaw dist/sage-agent-openclaw-sage-0.2.1.tgz
+	python scripts/package_check.py --source dist/sage-plugin-v0.2.2.zip --wheel dist/sage_agent_protocol-0.2.2-py3-none-any.whl --hermes dist/sage-hermes-plugin-v0.2.2.zip --openclaw dist/sage-agent-openclaw-sage-0.2.2.tgz

@@ -9,7 +9,7 @@ SAGE is a vendor-neutral semantic communication runtime and durable context bus 
 | Repository | https://github.com/NeuralBinary/SAGE |
 | Credits | @NeuralBinary, @ro0ti |
 | Version | v0.2 |
-| Package version | 0.2.1 |
+| Package version | 0.2.2 |
 | Protocol | `sage/0.2` |
 | Wire | `2` |
 | License | MIT |
@@ -105,7 +105,7 @@ service with authentication disabled only on a trusted interface:
 ```bash
 python -m venv .venv
 . .venv/bin/activate              # Windows: .venv\Scripts\Activate.ps1
-python -m pip install ./sage_agent_protocol-0.2.1-py3-none-any.whl
+python -m pip install ./sage_agent_protocol-0.2.2-py3-none-any.whl
 export SAGE_AUTH_REQUIRED=false  # PowerShell: $env:SAGE_AUTH_REQUIRED="false"
 sage-api
 ```
@@ -120,10 +120,10 @@ sage-demo
 Release assets:
 
 ```text
-Python/runtime   -> sage_agent_protocol-0.2.1-py3-none-any.whl
-Hermes Agent     -> sage-hermes-plugin-v0.2.1.zip
-OpenClaw         -> sage-agent-openclaw-sage-0.2.1.tgz
-Source           -> sage-plugin-v0.2.1.zip
+Python/runtime   -> sage_agent_protocol-0.2.2-py3-none-any.whl
+Hermes Agent     -> sage-hermes-plugin-v0.2.2.zip
+OpenClaw         -> sage-agent-openclaw-sage-0.2.2.tgz
+Source           -> sage-plugin-v0.2.2.zip
 Checksums        -> SHA256SUMS
 ```
 

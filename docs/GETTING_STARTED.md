@@ -43,7 +43,7 @@ Python 3.11 or newer is required.
 ```bash
 python -m venv .venv
 . .venv/bin/activate
-python -m pip install ./sage_agent_protocol-0.2.1-py3-none-any.whl
+python -m pip install ./sage_agent_protocol-0.2.2-py3-none-any.whl
 export SAGE_AUTH_REQUIRED=false
 sage-api
 ```
@@ -70,8 +70,8 @@ settings are documented in `CONFIGURATION.md`, `SECURITY.md`, and
 ## Connect Hermes
 
 ```bash
-unzip sage-hermes-plugin-v0.2.1.zip
-cd sage-hermes-plugin-v0.2.1
+unzip sage-hermes-plugin-v0.2.2.zip
+cd sage-hermes-plugin-v0.2.2
 ./install.sh
 ```
 
@@ -82,7 +82,7 @@ Windows instructions are in `integrations/hermes/README.md`.
 ## Connect OpenClaw
 
 ```bash
-openclaw plugins install npm-pack:./sage-agent-openclaw-sage-0.2.1.tgz
+openclaw plugins install npm-pack:./sage-agent-openclaw-sage-0.2.2.tgz
 openclaw plugins enable sage
 openclaw plugins inspect sage --runtime --json
 ```
