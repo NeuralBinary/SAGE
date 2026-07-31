@@ -1,0 +1,168 @@
+from __future__ import annotations
+
+import json
+import re
+import tomllib
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+EXPECTED_VERSION = "0.1.0"
+EXPECTED_RELEASE = "v0.1"
+EXPECTED_PROTOCOL = "sage/0.1"
+EXPECTED_WIRE = 1
+EXPECTED_REPOSITORY = "https://github.com/NeuralBinary/SAGE"
+EXPECTED_AUTHOR = "NeuralBinary"
+EXPECTED_CREDITS = ["@NeuralBinary", "@ro0ti"]
+
+
+def load_json(path: str) -> dict:
+    return json.loads((ROOT / path).read_text(encoding="utf-8"))
+
+
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        raise SystemExit(f"release consistency check failed: {message}")
+
+
+def text_files(root: Path):
+    paths = [root] if root.is_file() else root.rglob("*")
+    for path in paths:
+        if not path.is_file() or "__pycache__" in path.parts:
+            continue
+        if path.suffix in {".pyc", ".tgz", ".whl", ".zip", ".db"}:
+            continue
+        try:
+            yield path, path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+
+
+def main() -> None:
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    project = pyproject["project"]
+    require(project["version"] == EXPECTED_VERSION, "pyproject version drift")
+    require(project["authors"] == [{"name": EXPECTED_AUTHOR}], "pyproject author drift")
+    require([item["name"] for item in project["maintainers"]] == ["NeuralBinary", "ro0ti"], "pyproject maintainers drift")
+    require(project["urls"]["Repository"] == EXPECTED_REPOSITORY, "pyproject repository drift")
+
+    plugin = load_json("plugin.json")
+    require(plugin["name"] == "SAGE", "plugin project name drift")
+    require(plugin["version"] == EXPECTED_VERSION, "plugin version drift")
+    require(plugin["release"] == EXPECTED_RELEASE, "plugin public release drift")
+    require(plugin["protocol"] == EXPECTED_PROTOCOL, "plugin protocol drift")
+    require(plugin["author"] == EXPECTED_AUTHOR, "plugin author drift")
+    require(plugin["credits"] == EXPECTED_CREDITS, "plugin credits drift")
+    require(plugin["repository"] == EXPECTED_REPOSITORY, "plugin repository drift")
+
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    for value in ["Project | SAGE", "Author | NeuralBinary", EXPECTED_REPOSITORY, "@NeuralBinary, @ro0ti", f"Version | {EXPECTED_RELEASE}"]:
+        require(value in readme, f"README metadata missing: {value}")
+    license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
+    require("Copyright (c) 2026 NeuralBinary" in license_text, "license attribution drift")
+
+    openclaw_pkg = load_json("integrations/openclaw/package.json")
+    openclaw_manifest = load_json("integrations/openclaw/openclaw.plugin.json")
+    require(openclaw_pkg["version"] == EXPECTED_VERSION, "OpenClaw package version drift")
+    require(openclaw_pkg["author"] == EXPECTED_AUTHOR, "OpenClaw author drift")
+    require(openclaw_pkg["contributors"] == ["NeuralBinary", "ro0ti"], "OpenClaw credits drift")
+    require(openclaw_pkg["repository"]["url"] == f"git+{EXPECTED_REPOSITORY}.git", "OpenClaw repository drift")
+    require(openclaw_manifest["version"] == EXPECTED_VERSION, "OpenClaw manifest version drift")
+
+    hermes_yaml = (ROOT / "integrations/hermes/sage/plugin.yaml").read_text(encoding="utf-8")
+    require(re.search(r'^version:\s*["\']?0\.1\.0["\']?\s*$', hermes_yaml, re.MULTILINE) is not None, "Hermes manifest version drift")
+
+    init_py = (ROOT / "src/sage_plugin/__init__.py").read_text(encoding="utf-8")
+    protocol_py = (ROOT / "src/sage_plugin/protocol_spec.py").read_text(encoding="utf-8")
+    require(f'__version__ = "{EXPECTED_VERSION}"' in init_py, "Python package version drift")
+    require(f'SAGE_PROTOCOL = "{EXPECTED_PROTOCOL}"' in protocol_py, "protocol constant drift")
+    require(f"SAGE_WIRE_VERSION = {EXPECTED_WIRE}" in protocol_py, "wire constant drift")
+
+    tck = load_json("tck/vectors/core.json")
+    require(tck["protocol"] == EXPECTED_PROTOCOL, "TCK protocol drift")
+    require(tck["wire_version"] == EXPECTED_WIRE, "TCK wire version drift")
+    require(load_json("src/sage_plugin/tck/vectors/core.json") == tck, "packaged TCK differs from repository TCK")
+
+    required = [
+        "spec/SAGE-0.1.md",
+        "spec/sage-v0.1.proto",
+        "spec/schemas/wire-v1.schema.json",
+        "spec/schemas/pattern-v0.1.schema.json",
+        "src/sage_plugin/spec/SAGE-0.1.md",
+        "src/sage_plugin/spec/sage-v0.1.proto",
+        "src/sage_plugin/spec/wire-v1.schema.json",
+        "src/sage_plugin/spec/pattern-v0.1.schema.json",
+    ]
+    for rel in required:
+        require((ROOT / rel).is_file(), f"missing required v0.1 artifact: {rel}")
+
+    require((ROOT / "spec/SAGE-0.1.md").read_bytes() == (ROOT / "src/sage_plugin/spec/SAGE-0.1.md").read_bytes(), "packaged protocol specification drift")
+    require((ROOT / "spec/sage-v0.1.proto").read_bytes() == (ROOT / "src/sage_plugin/spec/sage-v0.1.proto").read_bytes(), "packaged protobuf binding drift")
+
+    repo_schemas = sorted((ROOT / "spec/schemas").glob("*.json"))
+    require(repo_schemas, "no normative schemas found")
+    for schema_path in repo_schemas:
+        packaged = ROOT / "src/sage_plugin/spec" / schema_path.name
+        require(packaged.is_file(), f"missing packaged schema: {schema_path.name}")
+        require(schema_path.read_bytes() == packaged.read_bytes(), f"packaged schema drift: {schema_path.name}")
+
+    wire_schema = load_json("spec/schemas/wire-v1.schema.json")
+    require("g" in wire_schema.get("properties", {}), "wire signature field missing from schema")
+    require("e" in wire_schema.get("$defs", {}).get("WireAtomV1", {}).get("properties", {}), "wire epistemic field missing from schema")
+    require("signature" in load_json("spec/schemas/packet-v0.1.schema.json").get("properties", {}), "readable packet signature missing from schema")
+
+    migration_files = sorted(path.name for path in (ROOT / "alembic/versions").glob("*.py") if path.name != "__init__.py")
+    require(migration_files == ["0001_sage_0_1_baseline.py"], f"unexpected migration history: {migration_files}")
+
+    obsolete_patterns = [
+        re.compile(r"sage/0\.[2-9]"),
+        re.compile(r"\bv0\.[2-9](?:\.\d+)?\b"),
+        re.compile(r"\b0\.[2-9]\.0\b"),
+        re.compile(r"wire-v[2-9]"),
+        re.compile(r"SAGE-0\.[2-9]"),
+        re.compile(r"sage-v0\.[2-9]"),
+    ]
+    prose_forbidden = re.compile(r"\b(?:example|examples|placeholder|placeholders|mock|mocks|scaffold|scaffolding|guess|guessing)\b", re.IGNORECASE)
+    obsolete: list[str] = []
+    prose_violations: list[str] = []
+    for scan_root in [ROOT / "src", ROOT / "spec", ROOT / "tck", ROOT / "docs", ROOT / "integrations", ROOT / "README.md", ROOT / "plugin.json", ROOT / "pyproject.toml"]:
+        for path, text in text_files(scan_root):
+            rel = str(path.relative_to(ROOT))
+            if any(pattern.search(text) for pattern in obsolete_patterns):
+                obsolete.append(rel)
+            if path.suffix in {".md", ".txt"} and prose_forbidden.search(text):
+                prose_violations.append(rel)
+    require(not obsolete, f"obsolete version markers: {sorted(set(obsolete))}")
+    require(not prose_violations, f"development prose found: {sorted(set(prose_violations))}")
+
+    forbidden_artifacts: list[str] = []
+    for path in ROOT.rglob("*"):
+        rel = path.relative_to(ROOT)
+        if rel.parts and rel.parts[0] in {"build", "dist"}:
+            forbidden_artifacts.append(str(rel))
+            continue
+        if any(part in {".pytest_cache", ".ruff_cache", ".mypy_cache", "__pycache__"} for part in rel.parts):
+            forbidden_artifacts.append(str(rel))
+            continue
+        if path.is_file() and (path.suffix in {".pyc", ".db", ".sqlite", ".sqlite3"} or path.name.endswith(".egg-info")):
+            forbidden_artifacts.append(str(rel))
+        if path.is_dir() and path.name.endswith(".egg-info"):
+            forbidden_artifacts.append(str(rel))
+        if path.is_file() and path.suffix == ".tgz" and "integrations/openclaw" in str(rel):
+            forbidden_artifacts.append(str(rel))
+    require(not forbidden_artifacts, f"generated/runtime artifacts in source tree: {sorted(set(forbidden_artifacts))[:20]}")
+
+    print(json.dumps({
+        "ok": True,
+        "project": "SAGE",
+        "author": EXPECTED_AUTHOR,
+        "release": EXPECTED_RELEASE,
+        "version": EXPECTED_VERSION,
+        "protocol": EXPECTED_PROTOCOL,
+        "wire": EXPECTED_WIRE,
+        "migration": migration_files[0],
+        "tck_vectors": len(tck.get("valid", [])) + len(tck.get("invalid", [])),
+    }, separators=(",", ":")))
+
+
+if __name__ == "__main__":
+    main()

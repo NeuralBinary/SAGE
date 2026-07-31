@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: sage
+      POSTGRES_USER: sage
+      POSTGRES_PASSWORD: ${SAGE_POSTGRES_PASSWORD:?SAGE_POSTGRES_PASSWORD is required}
+    volumes:
+      - sage_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sage -d sage"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  sage:
+    build: .
+    environment:
+      SAGE_ENV: production
+      SAGE_DATABASE_URL: ${SAGE_DATABASE_URL:?SAGE_DATABASE_URL is required}
+      SAGE_API_KEYS: ${SAGE_API_KEYS:?SAGE_API_KEYS is required}
+      SAGE_ALLOWED_HOSTS: ${SAGE_ALLOWED_HOSTS:?SAGE_ALLOWED_HOSTS is required}
+      SAGE_AUTH_REQUIRED: "true"
+      SAGE_AUTO_CREATE_SCHEMA: "false"
+      SAGE_DOCS_ENABLED: "false"
+      SAGE_METRICS_PUBLIC: "false"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  sage_pg:

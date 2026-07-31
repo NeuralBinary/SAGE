@@ -1,0 +1,29 @@
+{
+  "name": "SAGE",
+  "version": "0.1.0",
+  "description": "Vendor-neutral semantic communication runtime and durable bus for AI agents.",
+  "runtime": "multi-adapter",
+  "entrypoints": {
+    "rest": "sage-api",
+    "mcp": "sage-mcp",
+    "python": "sage_plugin.SageRuntime"
+  },
+  "adapters": [
+    "rest",
+    "python",
+    "mcp",
+    "a2a",
+    "hermes",
+    "openclaw",
+    "claude",
+    "openai"
+  ],
+  "protocol": "sage/0.1",
+  "author": "NeuralBinary",
+  "credits": [
+    "@NeuralBinary",
+    "@ro0ti"
+  ],
+  "repository": "https://github.com/NeuralBinary/SAGE",
+  "release": "v0.1"
+}

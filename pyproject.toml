@@ -1,0 +1,80 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sage-agent-protocol"
+version = "0.1.0"
+description = "SAGE: secure vendor-neutral semantic communication runtime for AI agents"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "NeuralBinary"}]
+maintainers = [{name = "NeuralBinary"}, {name = "ro0ti"}]
+dependencies = [
+  "fastapi>=0.139.2,<1",
+  "pydantic>=2.13.4,<3",
+  "pydantic-settings>=2.14.2,<3",
+  "sqlalchemy>=2.0.51,<2.1",
+  "alembic>=1.18.5,<2",
+  "uvicorn[standard]>=0.52,<1",
+  "msgpack>=1.2.1,<2",
+  "httpx>=0.28.1,<1",
+  "prometheus-client>=0.25,<1",
+  "cryptography>=49,<50",
+]
+
+[project.urls]
+Homepage = "https://github.com/NeuralBinary/SAGE"
+Repository = "https://github.com/NeuralBinary/SAGE"
+Issues = "https://github.com/NeuralBinary/SAGE/issues"
+
+
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.3.4,<4"]
+mcp = ["mcp>=2,<3"]
+bench = ["tiktoken>=0.13,<1"]
+otel = ["opentelemetry-api>=1.44,<2", "opentelemetry-sdk>=1.44,<2"]
+dev = [
+  "pytest>=9.1.1,<10",
+  "httpx>=0.28.1,<1",
+  "ruff>=0.15.22,<1",
+  "mypy>=2.3,<3",
+]
+
+[project.entry-points."hermes_agent.plugins"]
+sage = "sage_plugin.hermes_plugin"
+
+[project.scripts]
+sage-api = "sage_plugin.main:run"
+sage-mcp = "sage_plugin.mcp_server:run"
+sage-sim = "sage_plugin.simulator:main"
+sage-integrate = "sage_plugin.integrate_cli:main"
+sage-tck = "sage_plugin.conformance:main"
+sage-conform = "sage_plugin.conformance:main"
+sage-inspect = "sage_plugin.inspect_cli:main"
+sage-bench = "sage_plugin.economics:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["B008", "E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = true
+
+[tool.setuptools.package-data]
+sage_plugin = ["spec/*", "tck/vectors/*.json"]

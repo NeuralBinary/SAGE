@@ -1,0 +1,620 @@
+from __future__ import annotations
+
+import base64
+import math
+import uuid
+from datetime import datetime, timezone
+from typing import Any, cast
+
+from sqlalchemy.orm import Session
+
+from .cache import CacheStore, cache_key
+from .codebook import Codebook
+from .compiler import compile_content
+from .config import Settings
+from .db_models import Concept, MessageAudit
+from .knowledge import KnowledgeStore
+from .references import ReferenceAccessError, ReferenceExpiredError, ReferenceStore, canonical_bytes
+from .protocol_spec import SAGE_WIRE_VERSION, canonical_json_bytes, canonical_msgpack_bytes, validate_wire_v1
+from .patterns import PatternStore
+from .semantic_safety import assess_unit
+from .signing import sign_wire, verify_wire
+from .schemas import Atom, DecodeResponse, EncodeRequest, EncodeResponse, FallbackMode, Packet, Provenance
+from .state import StateStore, apply_patch, diff
+from .telemetry import Telemetry
+
+
+class SageCodec:
+    def __init__(self, db: Session, settings: Settings) -> None:
+        self.db = db
+        self.settings = settings
+        self.codebook = Codebook(db, settings)
+        self.patterns = PatternStore(db, settings, self.codebook)
+        self.refs = ReferenceStore(db, settings)
+        self.states = StateStore(db)
+        self.knowledge = KnowledgeStore(db)
+        self.cache = CacheStore(db, settings.semantic_cache_ttl_seconds)
+        self.telemetry = Telemetry(settings)
+
+    def _budget_bytes(self, request: EncodeRequest) -> tuple[int, int | None]:
+        token_budget = request.budget.max_tokens if request.budget and request.budget.max_tokens else self.settings.default_token_budget
+        byte_budget = min(self.settings.max_packet_bytes, int(token_budget * self.settings.chars_per_token_estimate))
+        if request.budget and request.budget.max_bytes:
+            byte_budget = min(byte_budget, request.budget.max_bytes)
+        return byte_budget, token_budget
+
+    def _provenance(self, request: EncodeRequest) -> Provenance:
+        if request.provenance is not None:
+            prov = request.provenance.model_copy(deep=True)
+            if prov.producer is None:
+                prov.producer = request.sender
+            return prov
+        return Provenance(producer=request.sender, derivation="direct")
+
+    def _compact_payload(self, packet: Packet) -> dict[str, Any]:
+        """Stable compact wire form. The API model remains readable; the wire does not pay for verbose keys."""
+        payload: dict[str, Any] = {"v": SAGE_WIRE_VERSION, "c": packet.cb, "a": packet.act}
+        if packet.id:
+            payload["i"] = packet.id
+        if packet.sender:
+            payload["s"] = packet.sender
+        if packet.receiver:
+            payload["r"] = packet.receiver
+        if packet.atoms:
+            payload["x"] = [
+                {k: v for k, v in {"c": a.code, "v": a.cv, "l": a.literal if a.literal is not None else None, "h": 1 if a.has_literal else None, "p": a.path, "q": a.confidence if a.confidence != 1.0 else None, "e": a.epistemic_type if a.epistemic_type != "fact" else None}.items() if v is not None}
+                for a in packet.atoms
+            ]
+        if packet.refs:
+            payload["R"] = packet.refs
+        if packet.base:
+            payload["b"] = packet.base
+        if packet.delta is not None:
+            payload["d"] = packet.delta
+        prov = packet.prov
+        try:
+            observed = int(datetime.fromisoformat(prov.observed_at).timestamp())
+        except ValueError:
+            observed = prov.observed_at
+        p = {k: v for k, v in {"s": prov.source_ids or None, "t": observed, "q": prov.confidence if prov.confidence != 1.0 else None, "d": prov.derivation if prov.derivation != "direct" else None, "p": prov.producer}.items() if v is not None}
+        payload["p"] = p
+        meta = {k: v for k, v in packet.meta.items() if k in {"state", "revision", "budget_exceeded", "memory_tier"}}
+        if meta:
+            payload["m"] = meta
+        if packet.signature:
+            payload["g"] = packet.signature
+        return payload
+
+    def _wire(self, packet: Packet) -> tuple[str, bytes]:
+        compact = self._compact_payload(packet)
+        return (
+            canonical_json_bytes(compact).decode("utf-8"),
+            canonical_msgpack_bytes(compact),
+        )
+
+    def _packet_id(self) -> str:
+        return "P" + uuid.uuid4().hex
+
+    def compact(self, packet: Packet) -> dict[str, Any]:
+        return self._compact_payload(packet)
+
+    def expand(self, payload: dict[str, Any]) -> Packet:
+        validate_wire_v1(payload)
+        if self.settings.require_packet_signatures and "g" not in payload:
+            raise ValueError("packet signature required")
+        if "g" in payload and self.settings.packet_signing_public_key is not None:
+            if not verify_wire(payload, self.settings.packet_signing_public_key.get_secret_value()):
+                raise ValueError("invalid packet signature")
+        prov_raw = payload.get("p", {}) or {}
+        observed = prov_raw.get("t")
+        if isinstance(observed, (int, float)):
+            observed_at = datetime.fromtimestamp(observed, timezone.utc).isoformat()
+        else:
+            observed_at = str(observed) if observed else Provenance().observed_at
+        prov = Provenance(
+            source_ids=list(prov_raw.get("s") or []),
+            observed_at=observed_at,
+            confidence=float(prov_raw.get("q", 1.0)),
+            derivation=str(prov_raw.get("d", "direct")),
+            producer=prov_raw.get("p"),
+        )
+        atoms = [
+            Atom(
+                code=a.get("c"),
+                cv=a.get("v"),
+                literal=a.get("l"),
+                has_literal=bool(a.get("h", "l" in a)),
+                path=a.get("p"),
+                confidence=float(a.get("q", 1.0)),
+                epistemic_type=str(a.get("e", "fact")),
+            )
+            for a in payload.get("x", [])
+        ]
+        return Packet(
+            id=payload.get("i"),
+            cb=str(payload.get("c", self.settings.codebook)),
+            sender=payload.get("s"),
+            receiver=payload.get("r"),
+            act=str(payload.get("a", "report")),
+            atoms=atoms,
+            refs=list(payload.get("R", [])),
+            base=payload.get("b"),
+            delta=payload.get("d"),
+            prov=prov,
+            meta=dict(payload.get("m", {})),
+            signature=dict(payload.get("g", {})) if payload.get("g") else None,
+        )
+
+    def _semantic_packet(self, request: EncodeRequest, codebook_name: str, provenance: Provenance, decisions: list[dict[str, Any]], *, allow_patterns: bool = True) -> Packet:
+        packet = Packet(
+            cb=codebook_name,
+            sender=request.sender,
+            receiver=request.receiver,
+            act=request.act,
+            prov=provenance,
+        )
+        units = compile_content(request.content)
+        bounded_units = units[: self.settings.max_message_atoms]
+
+        if request.auto_learn and request.record_learning:
+            promoted = self.patterns.observe_units(codebook_name, bounded_units)
+            for pattern in promoted:
+                decisions.append({
+                    "action": "pattern_promoted_to_shadow",
+                    "pattern_id": pattern.pattern_id,
+                    "canonical": pattern.canonical,
+                    "concept_code": self.db.get(Concept, pattern.concept_id).code if self.db.get(Concept, pattern.concept_id) else None,
+                })
+
+        seen_shadow: set[str] = set()
+        for match in self.patterns.shadow_matches(codebook_name, bounded_units):
+            if match.pattern.pattern_id in seen_shadow:
+                continue
+            seen_shadow.add(match.pattern.pattern_id)
+            decisions.append({
+                "action": "pattern_shadow_match",
+                "pattern_id": match.pattern.pattern_id,
+                "canonical": match.pattern.canonical,
+                "span": [match.start, match.end],
+                "estimated_savings_bytes": match.pattern.estimated_savings_bytes,
+            })
+
+        if allow_patterns:
+            active = {match.start: match for match in self.patterns.active_matches(codebook_name, bounded_units, receiver=request.receiver, model=request.receiver_model, workspace=request.workspace)}
+        else:
+            active = {}
+            if self.patterns.active_matches(codebook_name, bounded_units, receiver=request.receiver, model=request.receiver_model, workspace=request.workspace):
+                decisions.append({"action": "patterns_disabled_receiver", "reason": "receiver_capability"})
+
+        def append_unit(unit: Any) -> None:
+            risk = assess_unit(unit)
+            match = self.codebook.match(codebook_name, unit.canonical, observe=request.record_learning)
+            concept = match.concept
+            if concept is None and request.auto_learn:
+                concept = self.codebook.observe_candidate(codebook_name, unit.canonical)
+            if concept:
+                score = max(match.similarity, concept.confidence)
+                if self.settings.semantic_firewall_enabled and risk.critical and match.similarity < self.settings.critical_semantic_threshold:
+                    decisions.append({"action": "semantic_firewall", "path": unit.path, "risk": risk.score, "reasons": list(risk.reasons), "decision": "preserve_literal"})
+                    packet.atoms.append(Atom(literal=unit.literal if unit.has_literal else (unit.surface or unit.canonical.replace("_", " ")), has_literal=True, path=unit.path, epistemic_type=risk.epistemic_type))
+                    return
+                preserve_surface = (
+                    not unit.has_literal
+                    and unit.surface is not None
+                    and match.similarity < self.settings.semantic_lossless_threshold
+                )
+                decisions.append({
+                    "action": "semantic_code",
+                    "path": unit.path,
+                    "canonical": unit.canonical,
+                    "code": concept.code,
+                    "version": concept.version,
+                    "similarity": round(score, 6),
+                    "surface_preserved": preserve_surface,
+                })
+                packet.atoms.append(
+                    Atom(
+                        code=concept.code,
+                        cv=concept.version,
+                        literal=unit.surface if preserve_surface else unit.literal,
+                        has_literal=preserve_surface or unit.has_literal,
+                        path=unit.path,
+                        confidence=score,
+                        epistemic_type=risk.epistemic_type,
+                    )
+                )
+            elif unit.has_literal:
+                decisions.append({"action": "literal", "path": unit.path, "reason": "task_specific_value"})
+                packet.atoms.append(Atom(literal=unit.literal, has_literal=True, path=unit.path, epistemic_type=risk.epistemic_type))
+            else:
+                literal = (unit.surface or unit.canonical.replace("_", " ")) if request.fallback_mode == "natural_language" else unit.canonical
+                decisions.append({
+                    "action": "fallback_literal",
+                    "path": unit.path,
+                    "reason": "unknown_or_ambiguous_concept",
+                    "mode": request.fallback_mode,
+                })
+                packet.atoms.append(Atom(literal=literal, has_literal=True, path=unit.path, epistemic_type=risk.epistemic_type))
+
+        index = 0
+        while index < len(bounded_units):
+            pattern_match = active.get(index)
+            if pattern_match is not None:
+                pattern = pattern_match.pattern
+                concept = self.db.get(Concept, pattern.concept_id)
+                if concept is not None and concept.status == "active":
+                    bindings = pattern_match.bindings
+                    decisions.append({
+                        "action": "pattern_code",
+                        "pattern_id": pattern.pattern_id,
+                        "canonical": pattern.canonical,
+                        "code": concept.code,
+                        "version": concept.version,
+                        "span": [pattern_match.start, pattern_match.end],
+                        "bindings": len(bindings),
+                        "estimated_savings_bytes": pattern.estimated_savings_bytes,
+                    })
+                    self.patterns.mark_used(pattern)
+                    packet.atoms.append(
+                        Atom(
+                            code=concept.code,
+                            cv=concept.version,
+                            literal=bindings if bindings else None,
+                            has_literal=bool(bindings),
+                            path=bounded_units[index].path,
+                            confidence=pattern.confidence,
+                            epistemic_type="fact",
+                        )
+                    )
+                    index = pattern_match.end
+                    continue
+            append_unit(bounded_units[index])
+            index += 1
+
+        if len(units) > self.settings.max_message_atoms:
+            decisions.append({"action": "fallback_reference", "reason": "atom_limit", "units": len(units)})
+            packet.atoms = []
+        if isinstance(request.content, (dict, list)):
+            state = self.states.create(
+                request.content,
+                workspace=request.workspace,
+                created_by=request.sender,
+                provenance=provenance.model_dump(),
+            )
+            packet.meta["state"] = state.id
+            packet.meta["revision"] = state.revision
+            decisions.append({"action": "state_checkpoint", "state": state.id})
+        return packet
+
+
+    def _reference_packet(self, request: EncodeRequest, codebook_name: str, provenance: Provenance, decisions: list[dict[str, Any]]) -> Packet:
+        acl = [request.receiver] if request.receiver else []
+        item = self.refs.put(
+            request.content,
+            workspace=request.workspace,
+            owner=request.sender,
+            acl=acl,
+            tier="hot",
+            encrypt=bool(self.settings.ref_encryption_key),
+            provenance=provenance.model_dump(),
+        )
+        grant = self.refs.grant_metadata(item.id, actor=request.sender, workspace=request.workspace)
+        decisions.append({"action": "reference", "ref": item.id, "reason": "size_or_budget", "tier": grant.tier})
+        meta: dict[str, Any] = {"memory_tier": grant.tier}
+        if isinstance(request.content, (dict, list)):
+            state = self.states.create(
+                request.content,
+                workspace=request.workspace,
+                created_by=request.sender,
+                provenance=provenance.model_dump(),
+            )
+            meta.update({"state": state.id, "revision": state.revision})
+            decisions.append({"action": "state_checkpoint", "state": state.id})
+        return Packet(
+            cb=codebook_name,
+            sender=request.sender,
+            receiver=request.receiver,
+            act=request.act,
+            refs=[item.id],
+            prov=provenance,
+            meta=meta,
+        )
+
+    def _delta_packet(self, request: EncodeRequest, base_id: str, codebook_name: str, provenance: Provenance, decisions: list[dict[str, Any]]) -> Packet | None:
+        base = self.states.get(base_id, workspace=request.workspace)
+        if base is None:
+            return None
+        patch = diff(base.payload, request.content)
+        target_state = self.states.create(
+            request.content,
+            parent_id=base.id,
+            workspace=request.workspace,
+            created_by=request.sender,
+            provenance=provenance.model_dump(),
+        )
+        decisions.append({"action": "delta", "base": base.id, "state": target_state.id, "operations": len(patch)})
+        return Packet(
+            cb=codebook_name,
+            sender=request.sender,
+            receiver=request.receiver,
+            act=request.act,
+            base=base.id,
+            delta=patch,
+            prov=provenance,
+            meta={"state": target_state.id, "revision": target_state.revision},
+        )
+
+    def encode(self, request: EncodeRequest) -> EncodeResponse:
+        codebook_name = request.codebook or self.settings.codebook
+        input_raw = canonical_bytes(request.content)
+        if len(input_raw) > self.settings.max_input_bytes:
+            raise ValueError(f"payload exceeds max_input_bytes={self.settings.max_input_bytes}")
+        provenance = self._provenance(request)
+        byte_budget, token_budget = self._budget_bytes(request)
+        decisions: list[dict[str, Any]] = [
+            {"action": "budget", "max_bytes": byte_budget, "max_tokens": token_budget},
+            {"action": "provenance", "sources": provenance.source_ids, "confidence": provenance.confidence},
+        ]
+        knowledge = self.knowledge.get(request.receiver, request.workspace) if request.use_receiver_knowledge else None
+        known_codes = set(request.receiver_known_codes)
+        if knowledge:
+            known_codes.update(self.knowledge.known_codes(request.receiver, request.workspace))
+            decisions.append({
+                "action": "receiver_model",
+                "receiver": request.receiver,
+                "known_codes": len(self.knowledge.known_codes(request.receiver, request.workspace)),
+                "known_refs": len(self.knowledge.known_refs(request.receiver, request.workspace)),
+                "current_state": knowledge.current_state,
+            })
+        request.receiver_known_codes = known_codes
+        if knowledge and knowledge.capabilities:
+            cap_bytes = knowledge.capabilities.get("max_packet_bytes")
+            if isinstance(cap_bytes, int) and cap_bytes > 0:
+                byte_budget = min(byte_budget, cap_bytes)
+                decisions[0] = {"action": "budget", "max_bytes": byte_budget, "max_tokens": token_budget}
+            fallback_modes = knowledge.capabilities.get("fallback_modes") or []
+            if fallback_modes and request.fallback_mode not in fallback_modes:
+                request.fallback_mode = cast(FallbackMode, "natural_language" if "natural_language" in fallback_modes else str(fallback_modes[0]))
+                decisions.append({"action": "fallback_negotiated", "mode": request.fallback_mode})
+        cb_fingerprint = self.codebook.fingerprint(codebook_name)
+        cache_descriptor = {
+            "content": request.content,
+            "sender": request.sender,
+            "receiver": request.receiver,
+            "receiver_model": request.receiver_model,
+            "act": request.act,
+            "codebook": codebook_name,
+            "base": request.base_state,
+            "knowledge": self.knowledge.fingerprint(request.receiver, request.workspace),
+            "budget": byte_budget,
+            "fallback": request.fallback_mode,
+            "workspace": request.workspace,
+            "cb": cb_fingerprint,
+        }
+        key = cache_key(cache_descriptor)
+        cache_hit = False
+        strategy = "semantic"
+        packet: Packet | None = None
+        if self.settings.semantic_cache_enabled and request.use_cache:
+            cached = self.cache.get(key, cb_fingerprint)
+            if cached is not None:
+                candidate = Packet.model_validate(cached.packet)
+                cache_valid = True
+                for ref_id in candidate.refs:
+                    try:
+                        if self.refs.get(ref_id, actor=request.receiver, workspace=request.workspace) is None:
+                            cache_valid = False
+                            break
+                    except (ReferenceAccessError, ReferenceExpiredError):
+                        cache_valid = False
+                        break
+                if cache_valid:
+                    packet = candidate
+                    packet.id = None
+                    strategy = str(packet.meta.get("strategy", "semantic"))
+                    decisions = list(cached.decisions) + [{"action": "semantic_cache_hit", "key": key[:16]}]
+                    cache_hit = True
+                else:
+                    decisions.append({"action": "semantic_cache_bypass", "reason": "stale_or_inaccessible_ref"})
+
+        if packet is None:
+            base_id = request.base_state
+            caps = knowledge.capabilities if knowledge else {}
+            if base_id is None and knowledge and isinstance(request.content, (dict, list)):
+                base_id = knowledge.current_state
+            supports_deltas = caps.get("supports_deltas", True)
+            if base_id and supports_deltas and isinstance(request.content, (dict, list)):
+                delta_packet = self._delta_packet(request, base_id, codebook_name, provenance, decisions)
+                if delta_packet is not None:
+                    delta_json, _ = self._wire(delta_packet)
+                    explicit_base = request.base_state is not None
+                    if len(delta_json.encode()) <= byte_budget and (explicit_base or len(delta_json.encode()) < len(input_raw)):
+                        packet = delta_packet
+                        strategy = "delta"
+                    else:
+                        decisions.append({"action": "reject_delta", "reason": "not_smaller_or_over_budget"})
+
+            if packet is None:
+                inline_limit = request.inline_limit or self.settings.max_inline_bytes
+                supports_refs = caps.get("supports_refs", True)
+                if supports_refs and (len(input_raw) > inline_limit or len(input_raw) > byte_budget):
+                    packet = self._reference_packet(request, codebook_name, provenance, decisions)
+                    strategy = "reference"
+                else:
+                    packet = self._semantic_packet(
+                        request,
+                        codebook_name,
+                        provenance,
+                        decisions,
+                        allow_patterns=request.use_patterns and bool(caps.get("supports_patterns", True)),
+                    )
+                    strategy = "semantic"
+                    semantic_json, _ = self._wire(packet)
+                    if (not packet.atoms or len(semantic_json.encode()) > byte_budget) and supports_refs:
+                        packet = self._reference_packet(request, codebook_name, provenance, decisions)
+                        strategy = "reference"
+
+            cacheable = strategy in {"reference", "delta"} or all(atom.code is not None for atom in packet.atoms)
+            if self.settings.semantic_cache_enabled and request.use_cache and cacheable:
+                cache_packet = packet.model_dump(exclude_none=True)
+                cache_packet.pop("id", None)
+                self.cache.put(key, cache_packet, decisions, cb_fingerprint)
+
+        packet.id = self._packet_id()
+        packet.meta.setdefault("strategy", strategy)
+        packet.meta.setdefault("codebook_fingerprint", cb_fingerprint)
+        packet.meta.setdefault("receiver_known_code_count", len(known_codes))
+        if self.settings.packet_signing_private_key is not None:
+            unsigned = self._compact_payload(packet)
+            unsigned.pop("g", None)
+            packet.signature = sign_wire(unsigned, self.settings.packet_signing_private_key.get_secret_value(), key_id=self.settings.packet_signing_key_id)
+            decisions.append({"action": "packet_signed", "key_id": self.settings.packet_signing_key_id})
+        json_wire, msgpack_wire = self._wire(packet)
+        out_json = len(json_wire.encode())
+        out_msgpack = len(msgpack_wire)
+        estimated_tokens = math.ceil(out_json / self.settings.chars_per_token_estimate)
+        if out_json > byte_budget:
+            packet.meta["budget_exceeded"] = True
+            decisions.append({"action": "budget_exceeded", "bytes": out_json, "limit": byte_budget, "reason": "lossless_fallback_required"})
+            json_wire, msgpack_wire = self._wire(packet)
+            out_json, out_msgpack = len(json_wire.encode()), len(msgpack_wire)
+            estimated_tokens = math.ceil(out_json / self.settings.chars_per_token_estimate)
+
+        semantic_loss = max([max(0.0, 1.0 - float(d.get("similarity", 1.0))) for d in decisions if d.get("action") == "semantic_code" and not d.get("surface_preserved") ] or [0.0])
+        used_codes = {a.code for a in packet.atoms if a.code}
+        known_ratio = (len(used_codes & known_codes) / len(used_codes)) if used_codes else 0.0
+        pattern_count = sum(1 for d in decisions if d.get("action") == "pattern_code")
+        ref_bytes_avoided = len(input_raw) if strategy == "reference" else 0
+        audit = MessageAudit(
+            packet_id=packet.id,
+            run_id=request.run_id,
+            sender=request.sender,
+            receiver=request.receiver,
+            workspace=request.workspace,
+            strategy=strategy,
+            cache_hit=cache_hit,
+            input_bytes=len(input_raw),
+            output_bytes=out_msgpack,
+            estimated_tokens=estimated_tokens,
+            budget_tokens=token_budget,
+            atom_count=len(packet.atoms),
+            ref_count=len(packet.refs),
+            packet=packet.model_dump(exclude_none=True),
+            decisions=decisions,
+            provenance=provenance.model_dump(),
+            semantic_loss_score=semantic_loss,
+            original_token_estimate=math.ceil(len(input_raw) / self.settings.chars_per_token_estimate),
+            receiver_known_ratio=known_ratio,
+            pattern_count=pattern_count,
+            ref_bytes_avoided=ref_bytes_avoided,
+        )
+        self.db.add(audit)
+        self.db.commit()
+        with self.telemetry.span(
+            "encode",
+            strategy=strategy,
+            sender=request.sender,
+            receiver=request.receiver,
+            packet_bytes=out_msgpack,
+            semantic_loss_score=semantic_loss,
+            receiver_known_ratio=known_ratio,
+        ):
+            self.telemetry.add("packet.bytes", out_msgpack, strategy=strategy)
+            self.telemetry.add("original.tokens", audit.original_token_estimate, strategy=strategy)
+            self.telemetry.add("sent.tokens", estimated_tokens, strategy=strategy)
+            self.telemetry.add("semantic_loss.score", semantic_loss, strategy=strategy)
+            self.telemetry.add("receiver_known.ratio", known_ratio, strategy=strategy)
+            if pattern_count:
+                self.telemetry.add("pattern.count", pattern_count, strategy=strategy)
+            if ref_bytes_avoided:
+                self.telemetry.add("ref.bytes_avoided", ref_bytes_avoided, strategy=strategy)
+        return EncodeResponse(
+            packet=packet,
+            wire_json=json_wire,
+            wire_msgpack_b64=base64.b64encode(msgpack_wire).decode(),
+            input_bytes=len(input_raw),
+            output_bytes_json=out_json,
+            output_bytes_msgpack=out_msgpack,
+            estimated_tokens=estimated_tokens,
+            budget_tokens=token_budget,
+            compression_ratio_json=(len(input_raw) / out_json) if out_json else 0.0,
+            compression_ratio_msgpack=(len(input_raw) / out_msgpack) if out_msgpack else 0.0,
+            strategy=strategy,
+            cache_hit=cache_hit,
+        )
+
+    def decode(
+        self,
+        packet: Packet,
+        resolve_refs: bool = False,
+        *,
+        receiver: str | None = None,
+        workspace: str = "default",
+        acknowledge: bool = False,
+    ) -> DecodeResponse:
+        concepts: list[dict[str, Any]] = []
+        literals: list[dict[str, Any]] = []
+        for atom in packet.atoms:
+            if atom.code:
+                concept = self.codebook.get_by_code(atom.code)
+                decoded_concept: dict[str, Any] = {
+                    "code": atom.code,
+                    "version": atom.cv,
+                    "canonical": concept.canonical if concept else None,
+                    "description": concept.description if concept else None,
+                    "literal": atom.literal,
+                    "path": atom.path,
+                    "confidence": atom.confidence,
+                    "status": concept.status if concept else "unknown",
+                    "epistemic_type": atom.epistemic_type,
+                }
+                if concept is not None:
+                    pattern = self.patterns.by_concept_id(concept.id)
+                    if pattern is not None:
+                        decoded_concept["pattern"] = {
+                            "pattern_id": pattern.pattern_id,
+                            "canonical": pattern.canonical,
+                            "status": pattern.status,
+                            "version": pattern.version,
+                            "composition": pattern.composition,
+                            "bindings": atom.literal if atom.has_literal else [],
+                        }
+                concepts.append(decoded_concept)
+            else:
+                literals.append({"literal": atom.literal, "path": atom.path, "epistemic_type": atom.epistemic_type})
+        references: list[dict[str, Any]] = []
+        actor = receiver or packet.receiver
+        for ref_id in packet.refs:
+            try:
+                item = self.refs.get(ref_id, actor=actor, workspace=workspace)
+                grant = self.refs.grant_metadata(ref_id, actor=actor, workspace=workspace) if item else None
+                references.append({
+                    "ref": ref_id,
+                    "media_type": item.media_type if item else None,
+                    "byte_size": item.byte_size if item else None,
+                    "tier": grant.tier if grant else None,
+                    "provenance": grant.provenance if grant else None,
+                    "value": self.refs.resolve(ref_id, actor=actor, workspace=workspace) if (item and resolve_refs) else None,
+                })
+            except (ReferenceAccessError, ReferenceExpiredError) as exc:
+                references.append({"ref": ref_id, "error": str(exc), "value": None})
+        base_payload = None
+        resolved_state = None
+        if packet.base:
+            state = self.states.get(packet.base, workspace=workspace)
+            base_payload = state.payload if state else None
+            if state is not None and packet.delta is not None:
+                resolved_state = apply_patch(state.payload, packet.delta)
+        if acknowledge and actor:
+            self.knowledge.acknowledge(actor, packet, workspace)
+            self.db.commit()
+        return DecodeResponse(
+            act=packet.act,
+            concepts=concepts,
+            literals=literals,
+            references=references,
+            provenance=packet.prov,
+            base_state=base_payload,
+            delta=packet.delta,
+            resolved_state=resolved_state,
+        )
