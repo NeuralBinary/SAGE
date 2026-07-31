@@ -1,0 +1,19 @@
+services:
+  sage:
+    build: .
+    environment:
+      SAGE_ENV: development
+      SAGE_DATABASE_URL: sqlite:////data/sage.db
+      SAGE_AUTH_REQUIRED: "false"
+      SAGE_AUTO_CREATE_SCHEMA: "true"
+      SAGE_DOCS_ENABLED: "true"
+      SAGE_METRICS_PUBLIC: "true"
+      SAGE_ALLOWED_HOSTS: localhost,127.0.0.1,sage
+    ports:
+      - "8080:8080"
+    volumes:
+      - sage_quickstart_data:/data
+    restart: unless-stopped
+
+volumes:
+  sage_quickstart_data:

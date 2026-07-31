@@ -44,6 +44,9 @@ def main() -> None:
     require(project["authors"] == [{"name": EXPECTED_AUTHOR}], "pyproject author drift")
     require([item["name"] for item in project["maintainers"]] == ["NeuralBinary", "ro0ti"], "pyproject maintainers drift")
     require(project["urls"]["Repository"] == EXPECTED_REPOSITORY, "pyproject repository drift")
+    scripts = project.get("scripts", {})
+    require(scripts.get("sage-doctor") == "sage_plugin.doctor_cli:main", "sage-doctor entry point drift")
+    require(scripts.get("sage-demo") == "sage_plugin.demo_cli:main", "sage-demo entry point drift")
 
     plugin = load_json("plugin.json")
     require(plugin["name"] == "SAGE", "plugin project name drift")
@@ -65,6 +68,7 @@ def main() -> None:
     require(openclaw_pkg["version"] == EXPECTED_VERSION, "OpenClaw package version drift")
     require(openclaw_pkg["author"] == EXPECTED_AUTHOR, "OpenClaw author drift")
     require(openclaw_pkg["contributors"] == ["NeuralBinary", "ro0ti"], "OpenClaw credits drift")
+    require(openclaw_pkg.get("license") == "MIT", "OpenClaw license metadata drift")
     require(openclaw_pkg["repository"]["url"] == f"git+{EXPECTED_REPOSITORY}.git", "OpenClaw repository drift")
     require(openclaw_manifest["version"] == EXPECTED_VERSION, "OpenClaw manifest version drift")
 
@@ -99,9 +103,18 @@ def main() -> None:
         "scripts/generate_specs.py",
         "scripts/package_check.py",
         "scripts/openclaw_adapter_check.mjs",
+        "scripts/build_release.py",
         "integrations/go/conformance.go",
+        ".env.example",
+        "docker-compose.quickstart.yml",
+        "quickstart.sh",
+        "quickstart.ps1",
+        "src/sage_plugin/doctor_cli.py",
+        "src/sage_plugin/demo_cli.py",
         "integrations/hermes/README.md",
+        "integrations/hermes/LICENSE",
         "integrations/hermes/install.sh",
+        "integrations/hermes/install.ps1",
         "integrations/hermes/sage/__init__.py",
         "integrations/hermes/sage/plugin.yaml",
         "docs/GETTING_STARTED.md",
@@ -110,6 +123,7 @@ def main() -> None:
         "integrations/openclaw/tck/core.json",
         "integrations/openclaw/package.json",
         "integrations/openclaw/openclaw.plugin.json",
+        "integrations/openclaw/LICENSE",
         "deploy/staging/compose.yml",
         ".github/workflows/scale.yml",
         "deploy/staging/nginx.conf",
@@ -200,7 +214,8 @@ def main() -> None:
             rel = str(path.relative_to(ROOT))
             if any(pattern.search(text) for pattern in obsolete_patterns):
                 obsolete.append(rel)
-            if path.suffix in {".md", ".txt"} and prose_forbidden.search(text):
+            prose_text = text.replace(".env.example", "")
+            if path.suffix in {".md", ".txt"} and prose_forbidden.search(prose_text):
                 prose_violations.append(rel)
     require(not obsolete, f"obsolete version markers: {sorted(set(obsolete))}")
     require(not prose_violations, f"development prose found: {sorted(set(prose_violations))}")

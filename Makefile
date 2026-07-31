@@ -1,4 +1,4 @@
-.PHONY: install test lint security performance verify run docker clean
+.PHONY: install test lint security performance verify run docker quickstart release clean
 install:
 	python -m pip install -e '.[dev]'
 test:
@@ -33,4 +33,9 @@ verify:
 run:
 	uvicorn sage_plugin.main:app --reload --port 8080
 docker:
-	docker compose up --build
+	docker compose -f docker-compose.yml up --build
+quickstart:
+	./quickstart.sh
+release:
+	python scripts/build_release.py --output dist
+	python scripts/package_check.py --source dist/sage-plugin-v0.2.1.zip --wheel dist/sage_agent_protocol-0.2.1-py3-none-any.whl --hermes dist/sage-hermes-plugin-v0.2.1.zip --openclaw dist/sage-agent-openclaw-sage-0.2.1.tgz

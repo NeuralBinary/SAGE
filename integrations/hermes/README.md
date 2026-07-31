@@ -1,49 +1,92 @@
 # SAGE for Hermes Agent
 
-The Hermes adapter is standalone. It uses only the Python standard library and does not modify the Hermes installation tree.
+This release is self-contained and uses only the Python standard library inside Hermes.
+SAGE itself runs as a separate service.
 
-## Source checkout
+## Install from the release ZIP
 
-From the SAGE repository:
+Linux/macOS:
 
 ```bash
-./integrations/hermes/install.sh
-hermes plugins enable sage
+unzip sage-hermes-plugin-v0.2.1.zip
+cd sage-hermes-plugin-v0.2.1
+./install.sh
 ```
 
-The installer writes to `$HERMES_HOME/plugins/sage` when `HERMES_HOME` is set, otherwise to `~/.hermes/plugins/sage`.
+Windows PowerShell:
+
+```powershell
+Expand-Archive .\sage-hermes-plugin-v0.2.1.zip
+cd .\sage-hermes-plugin-v0.2.1
+.\install.ps1
+```
+
+The installer copies the plugin to `$HERMES_HOME/plugins/sage`, or to
+`~/.hermes/plugins/sage` when `HERMES_HOME` is not set. It also enables the
+plugin when the `hermes` command is available.
+
+## Configure Hermes
+
+Set these variables in the environment used to start Hermes:
+
+```text
+SAGE_URL=http://127.0.0.1:8080
+SAGE_AGENT_ID=hermes-a
+SAGE_WORKSPACE=default
+SAGE_API_KEY=
+SAGE_MAX_INJECT_TOKENS=1200
+```
+
+`SAGE_API_KEY` is needed only when the SAGE service requires authentication.
+Use a unique `SAGE_AGENT_ID` for each agent that has a separate mailbox.
+
+Verify the installation:
+
+```bash
+hermes plugins list --plain
+```
+
+The list should show `sage` as enabled. Start a new Hermes session after
+changing plugin files or environment variables.
 
 ## Hermes in Docker
 
-The official Hermes container keeps mutable state under `/opt/data`. Run the installer on the host against the directory mounted there:
+Install into the host directory mounted as Hermes data:
 
 ```bash
-./integrations/hermes/install.sh "$HERMES_DATA_DIR"
+./install.sh "$HERMES_DATA_DIR"
 ```
 
-Set these variables on the Hermes service:
+When SAGE runs on the Docker host, set:
 
 ```text
 SAGE_URL=http://host.docker.internal:8080
-SAGE_AGENT_ID=hermes-a
-SAGE_WORKSPACE=default
 ```
 
-Add Docker host-gateway resolution when SAGE runs on the Docker host:
+Linux Compose deployments may also need:
 
 ```yaml
 extra_hosts:
   - "host.docker.internal:host-gateway"
 ```
 
-Then recreate the Hermes container and enable SAGE:
+Then recreate Hermes and verify the plugin inside the container:
 
 ```bash
 docker exec "$HERMES_CONTAINER" hermes plugins enable sage
+docker exec "$HERMES_CONTAINER" hermes plugins list --plain
 ```
 
-## GitHub release asset
+## Verify SAGE itself
 
-The release asset `sage-hermes-plugin-v0.2.1.zip` contains the `sage/` plugin directory. Extract that directory into `$HERMES_HOME/plugins/`, set the SAGE environment variables, enable the plugin, and start a new Hermes session.
+From a machine with the Python SAGE package installed:
 
-The adapter injects claimed SAGE context before a model turn, ACKs it after a completed turn, and exposes `sage_handoff` for raw structured application data. Semantic encoding remains owned by SAGE.
+```bash
+sage-doctor --url http://127.0.0.1:8080 --agent-id hermes-a
+```
+
+For Docker networking, run the same command using the URL that Hermes uses.
+
+The adapter passes raw structured application data to SAGE, injects decoded
+peer context before a model turn, and acknowledges the claimed batch after the
+turn lifecycle completes. Semantic encoding remains owned by SAGE.

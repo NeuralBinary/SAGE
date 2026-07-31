@@ -5,7 +5,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     SAGE_AUTO_CREATE_SCHEMA=false
 WORKDIR /app
-RUN addgroup --system sage && adduser --system --ingroup sage sage
+RUN addgroup --system sage && adduser --system --ingroup sage sage \
+    && mkdir -p /data \
+    && chown sage:sage /data
 COPY pyproject.toml README.md LICENSE alembic.ini ./
 COPY src ./src
 COPY alembic ./alembic

@@ -52,7 +52,7 @@ Implemented capabilities include:
 
 ## Functional qualification
 
-The final working tree contains 104 automated tests. The full suite passes.
+The final working tree contains 107 automated tests. The full suite passes.
 
 Coverage includes transport encode/decode, durable handoff/claim/ACK/NACK, lease recovery, partition claims, ordering, idempotency, quotas, backpressure, identity-scoped authorization, semantic memory, contradictions, causal invalidation, information-flow labels, content-addressed references, selective disclosure, zero-copy forwarding, immutable states, checkpoints, reachability cleanup, concepts, learned patterns, source trust, holdout validation, counterfactual validation, receiver calibration, drift handling, semantic safety, signatures, federation, pub/sub, routing, A2A, economics, Inspector output, adapter-facing delivery, configuration validation, HTTP limits, W3C trace context, serialization properties, state patch properties, concurrency, codebook releases, Merkle synchronization, and bounded large-vocabulary lookup.
 
@@ -227,7 +227,28 @@ Request bodies are bounded. Production host validation is enabled. Sensitive met
 
 References use SHA-256 content identity while grants carry access, selective-field policy, tier, TTL, sensitivity, and provenance. Optional AES-GCM encryption validates key material. Ed25519 signature-required mode cannot start without verification material.
 
-`scripts/security_check.py` passes across 74 Python files and checks AST safety, TLS/deployment policy, Compose credentials, container hardening, and project metadata.
+`scripts/security_check.py` passes across 77 Python files and checks AST safety, TLS/deployment policy, Compose credentials, container hardening, and project metadata.
+
+## Quick-start and first-user qualification
+
+The release adds a local Docker Compose path with persistent SQLite storage,
+Linux/macOS and Windows launchers, `.env.example`, `sage-doctor`, and
+`sage-demo`. The doctor command verifies liveness, database readiness,
+`sage/0.2` wire identity, handoff, context claim, ACK, and removal from the
+pending mailbox.
+
+Automated tests exercise both two-agent delivery and a self-addressed
+single-agent lifecycle. The installed wheel was also run as an isolated package
+against a fresh SQLite service; `sage-doctor` completed every check and
+`sage-demo --single-agent` sent, decoded, and acknowledged its message.
+
+The standalone Hermes ZIP now extracts into one versioned directory and ships
+Linux/macOS and PowerShell installers, its own README, license, plugin manifest,
+and adapter. The source ZIP also extracts into one versioned directory.
+
+Environment parsing accepts both comma-separated and JSON-array forms for
+service API keys and allowed-host lists, matching Compose, shell, and managed
+deployment conventions.
 
 ## Distribution qualification
 
@@ -257,7 +278,7 @@ All locally executable v0.2 functional, protocol, semantic-safety, security, mig
 
 ## Source archive qualification
 
-The deterministic source ZIP is extracted into a separate directory and qualified independently from the working tree. The archive-level run passes the release, security, architecture, invariant, generated-schema, and generated-protocol checks. It passes all 104 automated tests, all 13 Python TCK vectors, all 13 JavaScript TCK vectors, all 13 Go TCK vectors, 250/250 malformed-wire mutations, and 1,000 differential cross-runtime comparisons.
+The deterministic source ZIP is extracted into a separate directory and qualified independently from the working tree. The archive-level run passes the release, security, architecture, invariant, generated-schema, and generated-protocol checks. It passes all 107 automated tests, all 13 Python TCK vectors, all 13 JavaScript TCK vectors, all 13 Go TCK vectors, 250/250 malformed-wire mutations, and 1,000 differential cross-runtime comparisons.
 
 A fresh database built from the extracted source reaches `0001_sage_0_2 (head)` and `alembic check` reports no new upgrade operations. OpenAPI builds as 3.1.0 with 81 paths.
 

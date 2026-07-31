@@ -6,7 +6,8 @@
     "dist",
     "openclaw.plugin.json",
     "README.md",
-    "tck"
+    "tck",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -44,5 +45,6 @@
   },
   "engines": {
     "node": ">=22.22.3"
-  }
+  },
+  "license": "MIT"
 }

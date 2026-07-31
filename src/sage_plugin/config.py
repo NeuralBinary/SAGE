@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import base64
+import json
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -17,10 +18,10 @@ class Settings(BaseSettings):
     db_max_overflow: int = 20
     db_pool_timeout_seconds: int = 30
     db_pool_recycle_seconds: int = 1800
-    api_keys: list[str] = Field(default_factory=list)
+    api_keys: Annotated[list[str], NoDecode] = Field(default_factory=list)
     agent_keys: dict[str, str] = Field(default_factory=dict)
     auth_required: bool = False
-    allowed_hosts: list[str] = Field(default_factory=list)
+    allowed_hosts: Annotated[list[str], NoDecode] = Field(default_factory=list)
     docs_enabled: bool = True
     metrics_public: bool = False
     http_max_body_bytes: int = 52_428_800
@@ -95,7 +96,7 @@ class Settings(BaseSettings):
     state_retention_days: int = 90
     native_token_min_eval_score: float = 0.98
     benchmark_tokenizer_api_key: SecretStr | None = None
-    benchmark_tokenizer_allowed_hosts: list[str] = Field(default_factory=list)
+    benchmark_tokenizer_allowed_hosts: Annotated[list[str], NoDecode] = Field(default_factory=list)
     packet_signing_private_key: SecretStr | None = None
     packet_signing_public_key: SecretStr | None = None
     packet_signing_key_id: str = "default"
@@ -125,19 +126,31 @@ class Settings(BaseSettings):
     bus_partition_count: int = 64
     gc_retain_audit_replay: bool = True
 
+    @staticmethod
+    def _string_list(value: object, *, lowercase: bool = False) -> object:
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        if not stripped:
+            return []
+        if stripped.startswith("["):
+            parsed = json.loads(stripped)
+            if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
+                raise ValueError("list setting must contain only strings")
+            values = [item.strip() for item in parsed if item.strip()]
+        else:
+            values = [item.strip() for item in stripped.split(",") if item.strip()]
+        return [item.lower() for item in values] if lowercase else values
+
     @field_validator("api_keys", mode="before")
     @classmethod
     def split_api_keys(cls, value: object) -> object:
-        if isinstance(value, str):
-            return [v.strip() for v in value.split(",") if v.strip()]
-        return value
+        return cls._string_list(value)
 
     @field_validator("allowed_hosts", "benchmark_tokenizer_allowed_hosts", mode="before")
     @classmethod
     def split_string_lists(cls, value: object) -> object:
-        if isinstance(value, str):
-            return [v.strip().lower() for v in value.split(",") if v.strip()]
-        return value
+        return cls._string_list(value, lowercase=True)
 
     @field_validator("semantic_threshold", "semantic_lossless_threshold", "promotion_max_neighbor_similarity", "native_token_min_eval_score", "pattern_shadow_min_success", "critical_semantic_threshold", "pattern_counterfactual_min_fidelity", "pattern_receiver_min_fidelity", "pattern_namespace_promotion_min_utility", "pattern_max_source_share", "pattern_min_trust_score", "calibration_max_ece", "pattern_holdout_min_fidelity", "pattern_drift_max_drop", "backpressure_degraded_ratio", "backpressure_throttled_ratio")
     @classmethod

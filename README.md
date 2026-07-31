@@ -16,6 +16,41 @@ SAGE is a vendor-neutral semantic communication runtime and durable context bus 
 
 SAGE core is independent of model providers and agent frameworks. Native and protocol adapters connect the same runtime to Hermes, OpenClaw, Claude, OpenAI, A2A, MCP, REST, Python, and custom orchestrators.
 
+## Start in five minutes
+
+The local quick start requires Docker and stores its SQLite database in a named
+volume. It is intended for evaluation and trusted local development.
+
+Linux/macOS:
+
+```bash
+./quickstart.sh
+```
+
+Windows PowerShell:
+
+```powershell
+.\quickstart.ps1
+```
+
+The script starts SAGE, waits for health, and runs a real handoff → claim → ACK
+check. Then open `http://127.0.0.1:8080/docs` or run another demonstration:
+
+```bash
+docker compose -f docker-compose.quickstart.yml exec -T sage \
+  sage-demo --url http://127.0.0.1:8080
+```
+
+To verify any existing deployment from an installed wheel:
+
+```bash
+sage-doctor --url http://127.0.0.1:8080
+sage-demo --url http://127.0.0.1:8080 --single-agent
+```
+
+Next, install the adapter for [Hermes](integrations/hermes/README.md),
+[OpenClaw](integrations/openclaw/README.md), or use the REST/Python API.
+
 ## Design goals
 
 SAGE v0.2 is built around these invariants:
@@ -62,46 +97,38 @@ Agent runtimes and model hosts
 
 SAGE owns semantic payload and shared-context behavior. A2A owns peer-agent lifecycle. MCP is an optional tool/context surface. Framework adapters use each host's supported lifecycle hooks.
 
-## Fast path
+## Install without Docker
 
-Start with [Getting started](docs/GETTING_STARTED.md). The repository is directly installable, and GitHub releases ship separate runtime, Hermes, and OpenClaw assets.
+Python 3.11 or newer is required. Install the release wheel and start a local
+service with authentication disabled only on a trusted interface:
+
+```bash
+python -m venv .venv
+. .venv/bin/activate              # Windows: .venv\Scripts\Activate.ps1
+python -m pip install ./sage_agent_protocol-0.2.1-py3-none-any.whl
+export SAGE_AUTH_REQUIRED=false  # PowerShell: $env:SAGE_AUTH_REQUIRED="false"
+sage-api
+```
+
+In another terminal:
+
+```bash
+sage-doctor
+sage-demo
+```
+
+Release assets:
 
 ```text
 Python/runtime   -> sage_agent_protocol-0.2.1-py3-none-any.whl
 Hermes Agent     -> sage-hermes-plugin-v0.2.1.zip
 OpenClaw         -> sage-agent-openclaw-sage-0.2.1.tgz
-Source checkout  -> sage-plugin-v0.2.1.zip or git clone
+Source           -> sage-plugin-v0.2.1.zip
+Checksums        -> SHA256SUMS
 ```
 
-The Hermes adapter is standalone and works with the official immutable Docker image by installing into the persistent Hermes data directory. OpenClaw can install directly from the source adapter directory or from the packed release asset.
-
-## Installation
-
-Python 3.11 or newer is required.
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -e '.[dev]'
-```
-
-Optional dependency groups:
-
-```bash
-python -m pip install -e '.[postgres]'
-python -m pip install -e '.[mcp]'
-python -m pip install -e '.[bench]'
-python -m pip install -e '.[otel]'
-```
-
-For local development, start the API with authentication disabled only on a trusted local interface:
-
-```bash
-export SAGE_AUTH_REQUIRED=false
-sage-api
-```
-
-The local development API listens on port 8080. Interactive API documentation is available only when `SAGE_DOCS_ENABLED=true`.
+Development installs may use `python -m pip install -e '.[dev]'`. Optional
+dependency groups are `postgres`, `mcp`, `bench`, and `otel`.
 
 ## Production deployment
 
@@ -124,7 +151,7 @@ PYTHONPATH=src alembic upgrade head
 Compose requires `SAGE_POSTGRES_PASSWORD`, `SAGE_DATABASE_URL`, `SAGE_API_KEYS`, and `SAGE_ALLOWED_HOSTS` to be provided by the deployment environment:
 
 ```bash
-docker compose up --build -d
+docker compose -f docker-compose.yml up --build -d
 ```
 
 The container runs as a non-root user with a read-only root filesystem, dropped Linux capabilities, `no-new-privileges`, a temporary writable `/tmp`, and automatic schema creation disabled.

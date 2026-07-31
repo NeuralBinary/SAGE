@@ -129,8 +129,12 @@ jobs:
       - run: PYTHONPATH=src python scripts/generate_specs.py --check
       - run: PYTHONPATH=src python scripts/generate_protocol_artifacts.py --check
       - run: python -c "from sage_plugin.mcp_server import build_server; assert build_server() is not None"
-      - run: python -m pip wheel . --no-deps --no-build-isolation -w dist
-      - run: python scripts/package_check.py --wheel dist/sage_agent_protocol-0.2.1-py3-none-any.whl
+      - run: python scripts/build_release.py --output dist --skip-openclaw
+      - run: |
+          python scripts/package_check.py \
+            --source dist/sage-plugin-v0.2.1.zip \
+            --wheel dist/sage_agent_protocol-0.2.1-py3-none-any.whl \
+            --hermes dist/sage-hermes-plugin-v0.2.1.zip
       - run: docker build -t sage-agent-protocol:test .
 
 
