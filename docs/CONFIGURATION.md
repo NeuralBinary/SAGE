@@ -7,7 +7,7 @@ SAGE configuration uses environment variables with the `SAGE_` prefix. Names bel
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `SAGE_ENV` | `development` | Runtime environment. `production` enables strict startup validation. |
-| `SAGE_DATABASE_URL` | `sqlite:///./sage.db` | SQLAlchemy database URL. Production rejects SQLite. |
+| `SAGE_DATABASE_URL` | `sqlite:///$HOME/sage.db` | SQLAlchemy database URL; when unset, the default is the current user's home-directory `sage.db`, independent of the working directory. An explicit value always takes precedence. Production rejects SQLite. |
 | `SAGE_DB_POOL_SIZE` | `10` | Server-database connection pool size. |
 | `SAGE_DB_MAX_OVERFLOW` | `20` | Additional pooled connections allowed above pool size. |
 | `SAGE_DB_POOL_TIMEOUT_SECONDS` | `30` | Maximum pool wait time. |

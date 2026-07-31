@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 from sage_plugin.config import Settings
@@ -13,6 +16,42 @@ def test_default_sqlite_database_does_not_depend_on_working_directory(tmp_path, 
 
     assert settings.database_url == f"sqlite:///{Path.home() / 'sage.db'}"
     assert not settings.database_url.endswith("./sage.db")
+
+
+def test_default_database_initializes_from_non_writable_working_directory(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    launch_dir = tmp_path / "launch"
+    launch_dir.mkdir()
+    source_root = Path(__file__).resolve().parents[1] / "src"
+    script = """
+import os
+from pathlib import Path
+
+os.chdir('/proc')
+from sqlalchemy import inspect
+from sage_plugin.config import Settings
+from sage_plugin.db import Base, engine, init_db
+
+assert Settings(auth_required=False).database_url == f"sqlite:///{Path.home() / 'sage.db'}"
+init_db()
+assert inspect(engine).has_table('concepts')
+assert (Path.home() / 'sage.db').is_file()
+"""
+    env = {key: value for key, value in os.environ.items() if not key.startswith("SAGE_")}
+    env.update({"HOME": str(home), "PYTHONPATH": str(source_root)})
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=launch_dir,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (home / "sage.db").is_file()
 
 
 def test_explicit_database_url_is_preserved(tmp_path, monkeypatch):
