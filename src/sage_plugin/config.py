@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import Field, SecretStr, field_validator, model_validator
@@ -13,7 +14,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SAGE_", env_file=".env", extra="ignore")
 
     env: Literal["development", "test", "production"] = "development"
-    database_url: str = "sqlite:///./sage.db"
+    database_url: str = f"sqlite:///{Path.home() / 'sage.db'}"
     db_pool_size: int = 10
     db_max_overflow: int = 20
     db_pool_timeout_seconds: int = 30
