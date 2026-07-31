@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from sage_plugin.config import Settings
 
 
@@ -21,14 +23,24 @@ def test_default_sqlite_database_does_not_depend_on_working_directory(tmp_path, 
 def test_default_database_initializes_from_non_writable_working_directory(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
-    launch_dir = tmp_path / "launch"
-    launch_dir.mkdir()
+    if sys.platform == "linux":
+        # Linux's procfs is always available and cannot be used as a cwd for
+        # relative database paths, preserving the original reproduction.
+        unavailable_cwd = Path("/proc")
+    else:
+        unavailable_cwd = tmp_path / "unavailable-cwd"
+        unavailable_cwd.mkdir()
+        try:
+            unavailable_cwd.chmod(0o555)
+        except OSError as exc:
+            pytest.skip(f"cannot create non-writable working directory: {exc}")
+        if os.access(unavailable_cwd, os.W_OK):
+            pytest.skip("platform does not provide a non-writable working directory here")
+
     source_root = Path(__file__).resolve().parents[1] / "src"
     script = """
-import os
 from pathlib import Path
 
-os.chdir('/proc')
 from sqlalchemy import inspect
 from sage_plugin.config import Settings
 from sage_plugin.db import Base, engine, init_db
@@ -43,7 +55,7 @@ assert (Path.home() / 'sage.db').is_file()
 
     result = subprocess.run(
         [sys.executable, "-c", script],
-        cwd=launch_dir,
+        cwd=unavailable_cwd,
         env=env,
         capture_output=True,
         text=True,
