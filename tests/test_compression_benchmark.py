@@ -104,9 +104,9 @@ def test_printed_tables_cover_all_sections(cb, bench_run):
 
 
 def test_benchmark_run_is_deterministic(cb, bench_run, tmp_path_factory):
-    out1, _ = bench_run
+    out1, results1 = bench_run
     out2 = tmp_path_factory.mktemp("bench2")
-    cb.run_benchmark(out_dir=out2)
+    results2 = cb.run_benchmark(out_dir=out2)
     first = json.loads((out1 / "compression_benchmark.json").read_text())
     second = json.loads((out2 / "compression_benchmark.json").read_text())
     assert _strip_latency(first) == _strip_latency(second)
@@ -114,6 +114,9 @@ def test_benchmark_run_is_deterministic(cb, bench_run, tmp_path_factory):
     serialized_second = json.dumps(_strip_latency(second), sort_keys=True).encode("utf-8")
     assert serialized_first == serialized_second
     assert (out1 / "compression_benchmark.csv").read_text() == (out2 / "compression_benchmark.csv").read_text()
+    # printed tables are fully deterministic: measured latency lives only in
+    # the JSON detail artifacts, never in the rendered tables
+    assert cb.format_tables(results1) == cb.format_tables(results2)
 
 
 # ---------------------------------------------------------------------------

@@ -96,8 +96,9 @@ MessagePack), stored bytes (state/reference stores), model-facing input
 tokens (tokens of the transmitted representation rendered as JSON text),
 model-facing output tokens (tokens of the reconstructed context the
 receiver must read), encode/decode latency (measured with
-``time.perf_counter``, rounded to ms -- the only non-deterministic columns),
-reference-fetch volume (bytes/count), and a cumulative cost.  The cost model
+``time.perf_counter``, rounded to ms -- reported ONLY in the JSON detail
+artifacts, never in the printed tables), reference-fetch volume
+(bytes/count), and a cumulative cost.  The cost model
 is synthetic but deterministic and documented::
 
     cost_usd = wire_bytes_json * 0.0000005        # $0.50 / MB
@@ -160,9 +161,11 @@ Determinism
   ``sage_plugin`` import; the standalone entry point does this in
   ``main()`` before any lazy import, and deletes its scratch database on
   exit.
-* Latency columns are measured and rounded to milliseconds; two runs'
-  artifacts are byte-identical once the ``*_latency_ms`` fields are
-  dropped.
+* Determinism: every printed table and the summary ``tables.*`` rows are
+  byte-identical across runs. Measured encode/decode latency lives only in
+  the JSON detail (``variants[*].turns[*].*_latency_ms`` and
+  ``variants[*].efficiency.*_latency_ms_mean``); two runs' JSON artifacts
+  are byte-identical once those ``*_latency_ms`` fields are dropped.
 """
 
 from __future__ import annotations
@@ -1251,8 +1254,6 @@ def _build_tables(variant_rows: list[dict[str, Any]]) -> dict[str, list[dict[str
                 "stored_bytes": eff["stored_bytes"],
                 "model_input_tokens": eff["model_input_tokens"],
                 "model_output_tokens": eff["model_output_tokens"],
-                "encode_latency_ms_mean": round(eff["encode_latency_ms_mean"], 1),
-                "decode_latency_ms_mean": round(eff["decode_latency_ms_mean"], 1),
                 "reference_fetch_bytes": eff["reference_fetch_bytes"],
                 "reference_fetch_count": eff["reference_fetch_count"],
                 "cost_usd": round(eff["cost_usd"], 6),
@@ -1337,11 +1338,11 @@ def format_tables(results: dict[str, Any]) -> str:
     """Render the four ASCII summary tables."""
     sections: list[str] = []
 
-    eff_headers = ["variant", "wire_json", "wire_msgpack", "stored", "in_tok", "out_tok", "enc_ms", "dec_ms", "ref_bytes", "ref_cnt", "cost_usd"]
+    eff_headers = ["variant", "wire_json", "wire_msgpack", "stored", "in_tok", "out_tok", "ref_bytes", "ref_cnt", "cost_usd"]
     eff_rows: list[list[Any]] = []
     for row in results["tables"]["efficiency"]:
         if row.get("status") == "skipped":
-            eff_rows.append([row["variant"], "-", "-", "-", "-", "-", "-", "-", "-", "-", "-"])
+            eff_rows.append([row["variant"], "-", "-", "-", "-", "-", "-", "-", "-", "-"])
             continue
         eff_rows.append(
             [
@@ -1351,8 +1352,6 @@ def format_tables(results: dict[str, Any]) -> str:
                 row["stored_bytes"],
                 row["model_input_tokens"],
                 row["model_output_tokens"],
-                row["encode_latency_ms_mean"],
-                row["decode_latency_ms_mean"],
                 row["reference_fetch_bytes"],
                 row["reference_fetch_count"],
                 row["cost_usd"],
