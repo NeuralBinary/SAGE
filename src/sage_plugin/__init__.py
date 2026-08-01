@@ -2,5 +2,5 @@
 
 from .runtime import SageRuntime
 
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 __all__ = ["SageRuntime", "__version__"]
