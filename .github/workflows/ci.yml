@@ -18,6 +18,13 @@ jobs:
         with:
           go-version: "1.24.x"
       - run: python -m pip install -e '.[dev]'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.15.0"
+      - run: npm install --ignore-scripts
+        working-directory: integrations/openclaw
+      - run: npm run build
+        working-directory: integrations/openclaw
       - run: ruff check src tests scripts
       - run: python scripts/security_check.py
       - run: python scripts/architecture_check.py
@@ -33,13 +40,6 @@ jobs:
       - run: python scripts/performance_check.py --iterations 80
       - run: sage-qualify --profile-encode --profile-iterations 30 --max-query-count 40
       - run: rm -rf .pytest_cache .ruff_cache .mypy_cache src/*.egg-info src/sage_agent_protocol.egg-info && find . -type d -name __pycache__ -prune -exec rm -rf {} +
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24.15.0"
-      - run: npm install --ignore-scripts
-        working-directory: integrations/openclaw
-      - run: npm run build
-        working-directory: integrations/openclaw
       - run: rm -rf integrations/openclaw/node_modules integrations/openclaw/package-lock.json
       - run: python scripts/release_check.py
       - name: Migration verification
@@ -112,7 +112,7 @@ jobs:
       - run: node scripts/openclaw_adapter_check.mjs
       - run: npm pack --ignore-scripts
         working-directory: integrations/openclaw
-      - run: python ../../scripts/package_check.py --openclaw sage-agent-openclaw-sage-0.2.1.tgz
+      - run: python ../../scripts/package_check.py --openclaw sage-agent-openclaw-sage-0.2.2.tgz
         working-directory: integrations/openclaw
 
   package:
@@ -129,6 +129,10 @@ jobs:
         with:
           go-version: "1.24.x"
       - run: python -m pip install -e '.[dev,mcp,bench,otel]'
+      - run: npm install --ignore-scripts
+        working-directory: integrations/openclaw
+      - run: npm run build
+        working-directory: integrations/openclaw
       - run: sage-tck --json
       - run: python scripts/conformance_matrix.py
       - run: python scripts/differential_fuzz.py --iterations 500

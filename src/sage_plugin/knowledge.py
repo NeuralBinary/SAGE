@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .db_models import ReceiverKnowledge, ReceiverKnowledgeItem
@@ -28,11 +29,20 @@ class KnowledgeStore:
 
     def ensure(self, receiver: str, workspace: str = "default") -> ReceiverKnowledge:
         item = self.get(receiver, workspace)
-        if item is None:
-            item = ReceiverKnowledge(workspace=workspace, receiver=receiver)
-            self.db.add(item)
-            self.db.flush()
-        return item
+        if item is not None:
+            return item
+        for _ in range(2):
+            try:
+                with self.db.begin_nested():
+                    self.db.add(ReceiverKnowledge(workspace=workspace, receiver=receiver))
+            except IntegrityError:
+                pass  # concurrent writer won the unique-constraint race
+            item = self.get(receiver, workspace)
+            if item is not None:
+                return item
+            # Lost race and the winner had not committed yet; retry once so the
+            # insert blocks on the unique index until the winner's commit lands.
+        raise RuntimeError(f"receiver knowledge unavailable for {workspace}/{receiver}")
 
     def _values(self, receiver: str | None, workspace: str, kind: str) -> list[str]:
         if not receiver:
@@ -63,13 +73,29 @@ class KnowledgeStore:
                 ReceiverKnowledgeItem.value == value,
             )
         )
-        if exists is None:
-            self.db.add(ReceiverKnowledgeItem(workspace=workspace, receiver=receiver, kind=kind, value=value, confidence=confidence))
-        else:
+        if exists is not None:
             item = self.db.get(ReceiverKnowledgeItem, exists)
             if item is not None:
                 item.confidence = max(item.confidence, confidence)
                 item.stale_at = None
+            return
+        try:
+            with self.db.begin_nested():
+                self.db.add(ReceiverKnowledgeItem(workspace=workspace, receiver=receiver, kind=kind, value=value, confidence=confidence))
+            return
+        except IntegrityError:
+            pass  # concurrent writer inserted the same item first
+        item = self.db.scalar(
+            select(ReceiverKnowledgeItem).where(
+                ReceiverKnowledgeItem.workspace == workspace,
+                ReceiverKnowledgeItem.receiver == receiver,
+                ReceiverKnowledgeItem.kind == kind,
+                ReceiverKnowledgeItem.value == value,
+            )
+        )
+        if item is not None:
+            item.confidence = max(item.confidence, confidence)
+            item.stale_at = None
 
     def update_capabilities(self, receiver: str, capabilities: dict[str, Any], workspace: str = "default") -> ReceiverKnowledge:
         item = self.ensure(receiver, workspace)
