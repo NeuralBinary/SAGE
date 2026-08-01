@@ -10,7 +10,7 @@ import sys
 import tarfile
 import tempfile
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
 VERSION = "0.2.2"
@@ -41,7 +41,7 @@ def _epoch() -> int:
 
 
 def _zip_datetime(epoch: int) -> tuple[int, int, int, int, int, int]:
-    value = datetime.fromtimestamp(epoch, tz=timezone.utc)
+    value = datetime.fromtimestamp(epoch, tz=UTC)
     year = max(1980, value.year)
     return (year, value.month, value.day, value.hour, value.minute, value.second)
 
