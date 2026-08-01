@@ -15,7 +15,12 @@ Covers (issue #16, stage 3):
 * decoder-assisted mode counts expansion tokens in ``input_tokens``
   (RFC "Prevent hidden decompression costs");
 * adapter failures (non-zero exit / missing ``task_success``) raise a clear
-  error -- never silent fabrication.
+  error -- never silent fabrication;
+* hardening regression tests (adversary findings F1-F7): DB isolation and
+  repeat in-process ``main()`` calls, numeric reply validation, missing
+  executable / ``--output`` file / missing adapters-file error paths,
+  determinism modulo ``latency_ms``, and CLI hygiene (``--timeout`` > 0,
+  empty ``--variants``, stripped family/version).
 
 All tests are deterministic (fixed inputs, no network, no real model) and
 write their output directories under ``/opt/data/sage/scratch/`` -- never
@@ -28,6 +33,7 @@ import importlib.util
 import json
 import os
 import shutil
+import subprocess
 import sys
 import uuid
 from collections.abc import Iterator
@@ -339,3 +345,218 @@ def test_unknown_variant_rejected(h, monkeypatch):
     monkeypatch.setenv("SAGE_BENCH_LLM_PROVIDER", "fake")
     with pytest.raises(ValueError, match="unknown variant id"):
         h.run_harness(_adapters_config(), variants=["v99"])
+
+
+# ---------------------------------------------------------------------------
+# Hardening regression tests (adversary findings F1-F7)
+# ---------------------------------------------------------------------------
+
+
+def _two_family_config(command_tail: str) -> dict[str, Any]:
+    """Two-family config where the FIRST adapter runs the given reply script."""
+    return {
+        "acme-bad": {
+            "family": "acme",
+            "version": "1",
+            "command": [sys.executable, "-c", command_tail],
+        },
+        "nebula-ok": {
+            "family": "nebula",
+            "version": "1",
+            "command": [sys.executable, "-c", FAKE_ADAPTER_OK],
+        },
+    }
+
+
+def test_run_harness_refuses_without_database_url(h, monkeypatch, scratch_dir):
+    """F1: run_harness() must never operate on the ambient default database
+    (~/sage.db); without SAGE_DATABASE_URL it refuses with a RuntimeError."""
+    fake_home = scratch_dir / "fakehome"
+    fake_home.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.delenv("SAGE_DATABASE_URL", raising=False)
+    with pytest.raises(RuntimeError, match="SAGE_DATABASE_URL"):
+        h.run_harness(_adapters_config(), variants=["v01"])
+    assert not (fake_home / "sage.db").exists()  # ambient DB never created
+
+
+def test_repeated_in_process_main_calls(h, monkeypatch, scratch_dir):
+    """F1: two sequential in-process main() calls must both succeed and the
+    SAGE_DATABASE_URL env must be restored (no engine left bound to a deleted
+    scratch db file)."""
+    monkeypatch.setenv("SAGE_BENCH_LLM_PROVIDER", "fake")
+    fake_home = scratch_dir / "fakehome"
+    fake_home.mkdir()
+    cfg = scratch_dir / "adapters.json"
+    cfg.write_text(json.dumps(_adapters_config()))
+    script = scratch_dir / "two_calls.py"
+    script.write_text(
+        "import importlib.util, os, sys\n"
+        "from pathlib import Path\n"
+        f"ROOT = Path({str(ROOT)!r})\n"
+        "sys.path.insert(0, str(ROOT / 'src')); sys.path.insert(0, str(ROOT / 'scripts'))\n"
+        f"HARNESS = {str(HARNESS_SCRIPT)!r}\n"
+        f"CFG = {str(cfg)!r}\n"
+        f"OUT_A = {str(scratch_dir / 'outA')!r}\n"
+        f"OUT_B = {str(scratch_dir / 'outB')!r}\n"
+        "spec = importlib.util.spec_from_file_location('model_eval_harness', HARNESS)\n"
+        "h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)\n"
+        "rc1 = h.main(['--adapters', CFG, '--output', OUT_A, '--variants', 'v09'])\n"
+        "rc2 = h.main(['--adapters', CFG, '--output', OUT_B, '--variants', 'v09'])\n"
+        "print('rc1=' + str(rc1) + ' rc2=' + str(rc2) + ' env_after=' + repr(os.environ.get('SAGE_DATABASE_URL')))\n"
+    )
+    env = {**os.environ, "HOME": str(fake_home)}
+    env.pop("SAGE_DATABASE_URL", None)
+    completed = subprocess.run(
+        [sys.executable, str(script)], capture_output=True, text=True, timeout=300, env=env
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "rc1=0 rc2=0 env_after=None" in completed.stdout
+
+
+def test_adapter_garbage_numerics_rejected(h, monkeypatch, scratch_dir):
+    """F2: non-finite/out-of-range/negative/string numerics raise an
+    adapter-naming RuntimeError; artifacts stay valid RFC 8259 JSON."""
+    monkeypatch.setenv("SAGE_BENCH_LLM_PROVIDER", "fake")
+    cases = [
+        (
+            "task_success inf",
+            "import json,sys,math; print(json.dumps({'task_success': float('inf'), 'input_tokens': 1, 'output_tokens': 1, 'provider_cost_usd': 0.0}))",
+            "task_success",
+        ),
+        (
+            "task_success nan",
+            "import json,sys,math; print(json.dumps({'task_success': float('nan'), 'input_tokens': 1, 'output_tokens': 1, 'provider_cost_usd': 0.0}))",
+            "task_success",
+        ),
+        (
+            "task_success out of range",
+            "import json,sys; print(json.dumps({'task_success': 2.0, 'input_tokens': 1, 'output_tokens': 1, 'provider_cost_usd': 0.0}))",
+            "task_success",
+        ),
+        (
+            "negative tokens",
+            "import json,sys; print(json.dumps({'task_success': 1.0, 'input_tokens': -5, 'output_tokens': 1, 'provider_cost_usd': 0.0}))",
+            "input_tokens",
+        ),
+        (
+            "string tokens",
+            "import json,sys; print(json.dumps({'task_success': 1.0, 'input_tokens': 'abc', 'output_tokens': 1, 'provider_cost_usd': 0.0}))",
+            "input_tokens",
+        ),
+        (
+            "fractional tokens",
+            "import json,sys; print(json.dumps({'task_success': 1.0, 'input_tokens': 1.5, 'output_tokens': 1, 'provider_cost_usd': 0.0}))",
+            "input_tokens",
+        ),
+        (
+            "nan cost",
+            "import json,sys,math; print(json.dumps({'task_success': 1.0, 'input_tokens': 1, 'output_tokens': 1, 'provider_cost_usd': float('nan')}))",
+            "provider_cost_usd",
+        ),
+        (
+            "negative cost",
+            "import json,sys; print(json.dumps({'task_success': 1.0, 'input_tokens': 1, 'output_tokens': 1, 'provider_cost_usd': -1.0}))",
+            "provider_cost_usd",
+        ),
+        (
+            "string cost",
+            "import json,sys; print(json.dumps({'task_success': 1.0, 'input_tokens': 1, 'output_tokens': 1, 'provider_cost_usd': 'abc'}))",
+            "provider_cost_usd",
+        ),
+    ]
+    for name, tail, field in cases:
+        with pytest.raises(RuntimeError, match="acme-bad") as exc_info:
+            h.run_harness(_two_family_config(tail), variants=["v01"], timeout=30)
+        assert field in str(exc_info.value), name
+        assert "acme-bad" in str(exc_info.value), name
+
+    # the artifact writer refuses to emit non-finite numbers (RFC 8259 strict)
+    out_dir = scratch_dir / "nan-artifact"
+    with pytest.raises(RuntimeError, match="non-finite"):
+        h._write_artifacts(out_dir, {"rows": [{"latency_ms": float("nan")}], "markdown": ""})
+
+
+def test_missing_adapter_executable_clean_error(h, monkeypatch):
+    """F3: a missing adapter executable surfaces as an adapter-naming
+    RuntimeError, never a raw FileNotFoundError traceback."""
+    monkeypatch.setenv("SAGE_BENCH_LLM_PROVIDER", "fake")
+    cfg = {
+        "acme-missing-bin": {"family": "acme", "version": "1", "command": ["/nonexistent/binary-xyz"]},
+        "nebula-ok": {"family": "nebula", "version": "1", "command": [sys.executable, "-c", FAKE_ADAPTER_OK]},
+    }
+    with pytest.raises(RuntimeError, match="acme-missing-bin could not start"):
+        h.run_harness(cfg, variants=["v01"])
+
+
+def test_output_path_existing_file_exit_2(h, monkeypatch, scratch_dir, capsys):
+    """F4: --output pointing at an existing FILE exits 2 before any run."""
+    monkeypatch.setenv("SAGE_BENCH_LLM_PROVIDER", "fake")
+    cfg = scratch_dir / "adapters.json"
+    cfg.write_text(json.dumps(_adapters_config()))
+    out_file = scratch_dir / "iamafile.txt"
+    out_file.write_text("x")
+    assert h.main(["--adapters", str(cfg), "--output", str(out_file), "--variants", "v01"]) == 2
+    assert "--output path exists and is not a directory" in capsys.readouterr().err
+
+
+def test_missing_adapters_file_exit_2(h, monkeypatch, capsys):
+    """F5: a nonexistent --adapters file exits 2 with a clean message."""
+    monkeypatch.setenv("SAGE_BENCH_LLM_PROVIDER", "fake")
+    assert h.main(["--adapters", "/nonexistent/no-such.json", "--variants", "v01"]) == 2
+    assert "no such adapters file" in capsys.readouterr().err
+
+
+def test_artifacts_deterministic_modulo_latency(h, monkeypatch, scratch_dir):
+    """F6: two runs produce byte-identical JSON artifacts once the measured
+    *_latency_ms row values are dropped, and byte-identical .md artifacts."""
+    monkeypatch.setenv("SAGE_BENCH_LLM_PROVIDER", "fake")
+    cfg = scratch_dir / "adapters.json"
+    cfg.write_text(json.dumps(_adapters_config()))
+    out_a = scratch_dir / "run-a"
+    out_b = scratch_dir / "run-b"
+    assert h.main(["--adapters", str(cfg), "--output", str(out_a), "--variants", "v01,v09"]) == 0
+    assert h.main(["--adapters", str(cfg), "--output", str(out_b), "--variants", "v01,v09"]) == 0
+
+    def _strip_latency(value: Any) -> Any:
+        # mirror the stage-2 convention (test_compression_benchmark): measured
+        # latency fields are excluded from determinism comparisons
+        if isinstance(value, dict):
+            return {key: _strip_latency(item) for key, item in value.items() if "latency" not in key}
+        if isinstance(value, list):
+            return [_strip_latency(item) for item in value]
+        return value
+
+    art_a = json.loads((out_a / "model_eval_harness.json").read_text())
+    art_b = json.loads((out_b / "model_eval_harness.json").read_text())
+    assert any("latency_ms" in row for row in art_a["rows"])  # latency is kept in rows
+    assert _strip_latency(art_a) == _strip_latency(art_b)
+    # byte-identical after dropping the latency fields (stage-2 convention)
+    serialized_a = json.dumps(_strip_latency(art_a), sort_keys=True).encode("utf-8")
+    serialized_b = json.dumps(_strip_latency(art_b), sort_keys=True).encode("utf-8")
+    assert serialized_a == serialized_b
+    assert (out_a / "model_eval_harness.md").read_bytes() == (out_b / "model_eval_harness.md").read_bytes()
+
+
+def test_hygiene_timeout_variants_and_stripping(h, monkeypatch, scratch_dir, capsys):
+    """F7: --timeout must be > 0; an empty --variants value is an error;
+    family/version values are whitespace-stripped on load."""
+    monkeypatch.setenv("SAGE_BENCH_LLM_PROVIDER", "fake")
+    # --timeout <= 0 is rejected by argparse (exit 2)
+    with pytest.raises(SystemExit) as excinfo:
+        h.main(["--timeout", "0"])
+    assert excinfo.value.code == 2
+    # an empty --variants value must not silently mean "all twelve"
+    cfg = scratch_dir / "adapters.json"
+    cfg.write_text(json.dumps(_adapters_config()))
+    assert h.main(["--adapters", str(cfg), "--variants", ""]) == 2
+    assert "at least one variant" in capsys.readouterr().err
+    # family/version are reported stripped after validation
+    padded = {name: dict(spec) for name, spec in _adapters_config().items()}
+    for spec in padded.values():
+        spec["family"] = f"  {spec['family']}  "
+        spec["version"] = f"  {spec['version']}  "
+    normalized = h.validate_adapters(padded)
+    for spec in normalized.values():
+        assert spec["family"] == spec["family"].strip()
+        assert spec["version"] == spec["version"].strip()

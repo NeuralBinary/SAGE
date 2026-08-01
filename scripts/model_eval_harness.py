@@ -114,9 +114,23 @@ deterministically::
 
 Raw artifacts (``--output <dir>``) are written OUTSIDE the repository:
 ``model_eval_harness.json`` (per-exchange rows + table rows + deltas) and
-``model_eval_harness.md``.  No ``.db``/``.sqlite``/``__pycache__`` files are
-left behind (the scratch codec database lives in the output dir / home and
-is deleted on exit).
+``model_eval_harness.md``.  The scratch codec database lives at
+``~/.sage-bench/model_eval_harness.db`` -- never inside the output dir -- and
+is stable for the lifetime of the process (it is never deleted while the
+module-level sqlalchemy engine may hold pooled connections to it); it is
+removed at process exit.  The output dir contains only the two artifacts.
+
+Determinism: two runs produce byte-identical printed tables, ``.md``
+artifacts and JSON artifacts except for the measured per-adapter-call
+``latency_ms`` row values (real wall-clock measurements, deliberately
+excluded from determinism comparisons); ``generated_at`` is pinned to the
+benchmark's fixed timestamp.
+
+``run_harness`` (the public API) refuses to run unless ``SAGE_DATABASE_URL``
+is set to a writable scratch database path -- it never operates on the
+ambient default database (``~/sage.db``); ``main()`` sets this up
+automatically.  ``--timeout`` must be > 0, an empty ``--variants`` value is
+an error, and ``family``/``version`` values are whitespace-stripped on load.
 
 Run it (provider configured):
 
@@ -128,9 +142,11 @@ Run it (provider configured):
 from __future__ import annotations
 
 import argparse
+import atexit
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import statistics
 import subprocess
@@ -162,6 +178,41 @@ RFC_TABLE_SEPARATOR = "| --- | --: | --: | --: | --: | --: |"
 #: Stage-2 variants whose per-turn content is the state dict, not a message.
 _STATE_VARIANTS = frozenset({"v05", "v06", "v11", "v12"})
 _ALL_VARIANT_IDS = [f"v{index:02d}" for index in range(1, 13)]
+
+
+def _scratch_db_path() -> Path:
+    """Stable per-process scratch database path (never deleted mid-process)."""
+    return Path.home() / ".sage-bench" / "model_eval_harness.db"
+
+
+def _cleanup_scratch_db() -> None:
+    """Best-effort removal of the scratch database at process exit.
+
+    The module-level engine is disposed first when it is bound to the scratch
+    file, so the file is never unlinked while a pooled connection may still
+    target it.  Only runs at interpreter exit; never mid-process.
+    """
+    path = _scratch_db_path()
+    db_module = sys.modules.get("sage_plugin.db")
+    if db_module is not None:
+        try:
+            url = db_module.engine.url
+            if url.drivername == "sqlite" and url.database:
+                try:
+                    engine_path = Path(url.database)
+                except TypeError:
+                    engine_path = None
+                if engine_path is not None and engine_path == path:
+                    db_module.engine.dispose()
+        except Exception:
+            pass
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+atexit.register(_cleanup_scratch_db)
 
 
 def _load_compression_benchmark() -> Any:
@@ -197,7 +248,11 @@ def validate_adapters(adapters: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"adapter {identity}: 'version' is required")
         if not isinstance(command, list) or not command or not all(isinstance(part, str) for part in command):
             raise ValueError(f"adapter {identity}: 'command' must be a non-empty list of strings")
-        families.add(family)
+        # Normalize: whitespace-padded family/version are accepted but always
+        # reported stripped (rows, families gate, artifact).
+        spec["family"] = family.strip()
+        spec["version"] = version.strip()
+        families.add(spec["family"])
     if len(families) < 2:
         raise ValueError(
             "adapter configuration must cover at least 2 distinct model families "
@@ -225,6 +280,8 @@ def _invoke(command: list[str], payload: dict[str, Any], timeout: float, identit
         )
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(f"adapter {identity} timed out after {timeout}s") from exc
+    except OSError as exc:
+        raise RuntimeError(f"adapter {identity} could not start: {exc}") from exc
     latency_ms = (time.perf_counter() - started) * 1000
     if completed.returncode != 0:
         raise RuntimeError(
@@ -348,16 +405,68 @@ def _build_payload(
     return payload
 
 
-def _critical_fact_recall(cb: Any, result: dict[str, Any], exchange: dict[str, Any]) -> float:
+def _critical_fact_recall(
+    cb: Any, result: dict[str, Any], exchange: dict[str, Any], identity: str
+) -> float:
     """Adapter-reported recall, else the harness's deterministic score of the
     adapter's reconstruction text (RFC fidelity checker), else 0.0."""
     reported = result.get("critical_fact_recall")
     if reported is not None:
-        return min(1.0, max(0.0, float(reported)))
+        if isinstance(reported, bool) or not isinstance(reported, (int, float)):
+            raise RuntimeError(
+                f"adapter {identity}: critical_fact_recall must be a finite number, got {reported!r}"
+            )
+        try:
+            value = float(reported)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise RuntimeError(
+                f"adapter {identity}: critical_fact_recall must be a finite number, got {reported!r}"
+            ) from exc
+        if not math.isfinite(value):
+            raise RuntimeError(
+                f"adapter {identity}: critical_fact_recall must be finite, got {reported!r}"
+            )
+        return min(1.0, max(0.0, value))
     reconstruction = result.get("reconstruction")
     if isinstance(reconstruction, str) and reconstruction.strip():
         return float(cb.fidelity_critical(reconstruction))
     return 0.0
+
+
+def _finite_float(
+    raw: Any,
+    identity: str,
+    key: str,
+    *,
+    minimum: float = -math.inf,
+    maximum: float | None = None,
+) -> float:
+    """Coerce to a finite float within [minimum, maximum]; adapter-naming
+    RuntimeError on any violation (never silently promotes garbage)."""
+    try:
+        value = float(raw)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise RuntimeError(f"adapter {identity}: {key} must be a finite number, got {raw!r}") from exc
+    if not math.isfinite(value):
+        raise RuntimeError(f"adapter {identity}: {key} must be finite, got {raw!r}")
+    if value < minimum:
+        raise RuntimeError(f"adapter {identity}: {key} must be >= {minimum}, got {raw!r}")
+    if maximum is not None and value > maximum:
+        raise RuntimeError(f"adapter {identity}: {key} must be <= {maximum}, got {raw!r}")
+    return value
+
+
+def _non_negative_int(raw: Any, identity: str, key: str) -> int:
+    """Require an integral, non-negative value; strings, bools, fractional
+    floats and non-finite numbers are rejected."""
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        raise RuntimeError(f"adapter {identity}: {key} must be a non-negative integer, got {raw!r}")
+    if isinstance(raw, float) and not raw.is_integer():
+        raise RuntimeError(f"adapter {identity}: {key} must be a non-negative integer, got {raw!r}")
+    value = int(raw)
+    if value < 0:
+        raise RuntimeError(f"adapter {identity}: {key} must be a non-negative integer, got {raw!r}")
+    return value
 
 
 def _row_from_result(
@@ -375,13 +484,25 @@ def _row_from_result(
     success = result.get("task_success")
     if success is None:
         raise RuntimeError(f"adapter {identity} did not report task_success")
-    provider_cost = float(result.get("provider_cost_usd", 0.0))
-    infrastructure_cost = float(result.get("infrastructure_cost_usd", 0.0))
-    retrieval_cost = float(result.get("retrieval_cost_usd", 0.0))
-    retry_cost = float(result.get("retry_cost_usd", 0.0))
-    component_total = provider_cost + infrastructure_cost + retrieval_cost + retry_cost
-    total_cost = float(result["cost_usd"]) if "cost_usd" in result else component_total
-    adapter_tokens = int(result.get("input_tokens", 0))
+    provider_cost = _finite_float(
+        result.get("provider_cost_usd", 0.0), identity, "provider_cost_usd", minimum=0.0
+    )
+    infrastructure_cost = _finite_float(
+        result.get("infrastructure_cost_usd", 0.0), identity, "infrastructure_cost_usd", minimum=0.0
+    )
+    retrieval_cost = _finite_float(
+        result.get("retrieval_cost_usd", 0.0), identity, "retrieval_cost_usd", minimum=0.0
+    )
+    retry_cost = _finite_float(
+        result.get("retry_cost_usd", 0.0), identity, "retry_cost_usd", minimum=0.0
+    )
+    if "cost_usd" in result:
+        total_cost = _finite_float(result["cost_usd"], identity, "cost_usd", minimum=0.0)
+    else:
+        total_cost = provider_cost + infrastructure_cost + retrieval_cost + retry_cost
+    if not math.isfinite(total_cost):
+        raise RuntimeError(f"adapter {identity}: cost_usd must be finite, got {total_cost!r}")
+    adapter_tokens = _non_negative_int(result.get("input_tokens", 0), identity, "input_tokens")
     expansion_tokens = cb._estimate_tokens(payload["model_facing_text"]) if decoder_mode == "decoder-assisted" else 0
     return {
         "variant": exchange["variant"],
@@ -400,18 +521,18 @@ def _row_from_result(
         "adapter_input_tokens": adapter_tokens,
         "expansion_tokens": expansion_tokens,
         "input_tokens": adapter_tokens + expansion_tokens,
-        "output_tokens": int(result.get("output_tokens", 0)),
+        "output_tokens": _non_negative_int(result.get("output_tokens", 0), identity, "output_tokens"),
         "provider_cost_usd": provider_cost,
         "infrastructure_cost_usd": infrastructure_cost,
         "retrieval_cost_usd": retrieval_cost,
         "retry_cost_usd": retry_cost,
         "cost_usd": total_cost,
-        "retrievals": int(result.get("retrievals", 0)),
-        "tool_calls": int(result.get("tool_calls", 0)),
-        "retries": int(result.get("retries", 0)),
-        "semantic_loss": float(result.get("semantic_loss", 0.0)),
-        "task_success": float(success),
-        "critical_fact_recall": _critical_fact_recall(cb, result, exchange),
+        "retrievals": _non_negative_int(result.get("retrievals", 0), identity, "retrievals"),
+        "tool_calls": _non_negative_int(result.get("tool_calls", 0), identity, "tool_calls"),
+        "retries": _non_negative_int(result.get("retries", 0), identity, "retries"),
+        "semantic_loss": _finite_float(result.get("semantic_loss", 0.0), identity, "semantic_loss"),
+        "task_success": _finite_float(success, identity, "task_success", minimum=0.0, maximum=1.0),
+        "critical_fact_recall": _critical_fact_recall(cb, result, exchange, identity),
         "latency_ms": float(result.get("latency_ms", 0.0)),
     }
 
@@ -514,10 +635,21 @@ def run_harness(
 ) -> dict[str, Any]:
     """Run the model evaluation harness end-to-end and return the full results.
 
+    Requires ``SAGE_DATABASE_URL`` to be set to a writable scratch database
+    path (the harness refuses to run against the ambient default ``~/sage.db``;
+    the CLI ``main()`` sets it up automatically).
+
     Raises ``ValueError`` for invalid configuration (including configs with
     fewer than 2 distinct model families) and ``RuntimeError`` for adapter
-    failures -- results are never fabricated.
+    failures or a missing ``SAGE_DATABASE_URL`` -- results are never
+    fabricated.
     """
+    if not os.environ.get("SAGE_DATABASE_URL", "").strip():
+        raise RuntimeError(
+            "SAGE_DATABASE_URL is not set; set it to a writable scratch database "
+            "path (e.g. sqlite:///<scratch>/sage_bench.db) before running the "
+            "harness -- refusing to touch the ambient default database (~/sage.db)"
+        )
     validate_adapters(adapters)
     if decoder_mode not in DECODER_MODES:
         raise ValueError(f"decoder_mode must be one of {DECODER_MODES}")
@@ -578,10 +710,24 @@ def run_harness(
 def _write_artifacts(out_dir: str | Path, results: dict[str, Any]) -> None:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    (out / "model_eval_harness.json").write_text(
-        json.dumps(results, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
-    )
+    try:
+        payload = (
+            json.dumps(results, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False) + "\n"
+        )
+    except ValueError as exc:
+        raise RuntimeError(
+            "adapter results contain non-finite numbers; refusing to write invalid RFC 8259 JSON"
+        ) from exc
+    (out / "model_eval_harness.json").write_text(payload)
     (out / "model_eval_harness.md").write_text(results["markdown"] + "\n")
+
+
+def _positive_timeout(value: str) -> float:
+    """argparse type: ``--timeout`` must be a positive number of seconds."""
+    parsed = float(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError(f"--timeout must be > 0, got {value!r}")
+    return parsed
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -604,7 +750,12 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="directory for model_eval_harness.json/.md raw artifacts (outside the repo)",
     )
-    parser.add_argument("--timeout", type=float, default=120.0, help="per-adapter-call timeout in seconds")
+    parser.add_argument(
+        "--timeout",
+        type=_positive_timeout,
+        default=120.0,
+        help="per-adapter-call timeout in seconds (must be > 0)",
+    )
     parser.add_argument(
         "--decoder-mode",
         choices=DECODER_MODES,
@@ -619,7 +770,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--variants",
         default=None,
-        help="comma-separated variant ids to evaluate (default: all twelve)",
+        help="comma-separated variant ids to evaluate (default: all twelve; an empty value is an error)",
     )
     args = parser.parse_args(argv)
 
@@ -627,24 +778,51 @@ def main(argv: list[str] | None = None) -> int:
         print(f"model evaluation harness: {NO_PROVIDER_NOTE}")
         return 0
 
+    # Reject an --output path that exists as a FILE before anything runs (no
+    # traceback, no wasted adapter calls); create the directory up front.
+    output_dir: Path | None = None
+    if args.output is not None:
+        out: Path = args.output
+        if out.exists() and not out.is_dir():
+            print(
+                "model evaluation harness: error: --output path exists and is not a directory",
+                file=sys.stderr,
+            )
+            return 2
+        out.mkdir(parents=True, exist_ok=True)
+        output_dir = out
+
     try:
         adapters = load_adapters(args.adapters)
-    except ValueError as exc:
+    except FileNotFoundError:
+        print(
+            f"model evaluation harness: error: no such adapters file: {args.adapters}",
+            file=sys.stderr,
+        )
+        return 2
+    except (ValueError, OSError) as exc:
         print(f"model evaluation harness: error: {exc}", file=sys.stderr)
         return 2
 
     variants: list[str] | None = None
-    if args.variants:
-        variants = [item.strip() for item in args.variants.split(",") if item.strip()]
+    if args.variants is not None:
+        segments = [item.strip() for item in args.variants.split(",")]
+        if not any(segments):
+            print(
+                "model evaluation harness: error: --variants must name at least one variant id",
+                file=sys.stderr,
+            )
+            return 2
+        variants = [item for item in segments if item]
 
-    # Bind an isolated scratch database BEFORE any sage_plugin import (db.py
-    # creates the engine at import time).  The file lives outside the worktree
-    # and is removed on exit.
-    if args.output is not None:
-        scratch_db = args.output / "sage_bench.db"
-    else:
-        scratch_db = Path.home() / ".sage-bench" / "model_eval_harness.db"
+    # Bind a STABLE per-process scratch database BEFORE any sage_plugin import
+    # (db.py creates the engine at import time).  The file lives in
+    # ~/.sage-bench -- never in the --output dir -- and is never deleted
+    # mid-process (the module-level engine may hold pooled connections to it);
+    # it is removed at process exit via _cleanup_scratch_db.
+    scratch_db = _scratch_db_path()
     scratch_db.parent.mkdir(parents=True, exist_ok=True)
+    prior_db_url = os.environ.get("SAGE_DATABASE_URL")
     os.environ["SAGE_DATABASE_URL"] = f"sqlite:///{scratch_db}"
     try:
         results = run_harness(
@@ -661,10 +839,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"model evaluation harness: error: {exc}", file=sys.stderr)
         return 1
     finally:
-        try:
-            scratch_db.unlink(missing_ok=True)
-        except OSError:
-            pass
+        if prior_db_url is None:
+            os.environ.pop("SAGE_DATABASE_URL", None)
+        else:
+            os.environ["SAGE_DATABASE_URL"] = prior_db_url
 
     print(
         f"Model evaluation harness (issue #16, stage 3) -- decoder mode: {args.decoder_mode}, "
@@ -674,9 +852,13 @@ def main(argv: list[str] | None = None) -> int:
     if results["deltas"]:
         print()
         print(_format_delta_table(results["deltas"]))
-    if args.output is not None:
-        _write_artifacts(args.output, results)
-        print(f"\nArtifacts written to {args.output}")
+    if output_dir is not None:
+        try:
+            _write_artifacts(output_dir, results)
+        except RuntimeError as exc:
+            print(f"model evaluation harness: error: {exc}", file=sys.stderr)
+            return 1
+        print(f"\nArtifacts written to {output_dir}")
     return 0
 
 
