@@ -38,7 +38,10 @@ SAGE data.
 
 ## Install the Python release
 
-Python 3.11 or newer is required.
+Python 3.11 or newer is required. Download
+`sage_agent_protocol-0.2.2-py3-none-any.whl` from the
+[v0.2.2 GitHub release](https://github.com/NeuralBinary/SAGE/releases/tag/v0.2.2),
+then install it:
 
 ```bash
 python -m venv .venv
@@ -69,6 +72,10 @@ settings are documented in `CONFIGURATION.md`, `SECURITY.md`, and
 
 ## Connect Hermes
 
+Download `sage-hermes-plugin-v0.2.2.zip` from the
+[v0.2.2 GitHub release](https://github.com/NeuralBinary/SAGE/releases/tag/v0.2.2),
+then:
+
 ```bash
 unzip sage-hermes-plugin-v0.2.2.zip
 cd sage-hermes-plugin-v0.2.2
@@ -80,6 +87,10 @@ start Hermes. Set `SAGE_API_KEY` when authentication is enabled. Full Docker and
 Windows instructions are in `integrations/hermes/README.md`.
 
 ## Connect OpenClaw
+
+Download `sage-agent-openclaw-sage-0.2.2.tgz` from the
+[v0.2.2 GitHub release](https://github.com/NeuralBinary/SAGE/releases/tag/v0.2.2),
+then:
 
 ```bash
 openclaw plugins install npm-pack:./sage-agent-openclaw-sage-0.2.2.tgz
