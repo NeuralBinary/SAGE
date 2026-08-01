@@ -20,7 +20,13 @@ Covers (issue #16, stage 3):
   repeat in-process ``main()`` calls, numeric reply validation, missing
   executable / ``--output`` file / missing adapters-file error paths,
   determinism modulo ``latency_ms``, and CLI hygiene (``--timeout`` > 0,
-  empty ``--variants``, stripped family/version).
+  empty ``--variants``, stripped family/version);
+* round-2 hardening regression tests (reviewer F8 + adversary Adv-1..Adv-6):
+  a per-process-unique scratch DB path with two CONCURRENT CLI runs both
+  succeeding, refusal to rebind a pre-imported ``sage_plugin`` engine (no
+  drop_all on a pre-bound user DB), ``latency_ms`` validation, bool
+  rejection in ``_finite_float``, ``--timeout`` nan/inf rejection, and no
+  empty ``--output`` dir left behind on a missing adapters file.
 
 All tests are deterministic (fixed inputs, no network, no real model) and
 write their output directories under ``/opt/data/sage/scratch/`` -- never
@@ -114,6 +120,26 @@ def _one_family_config() -> dict[str, Any]:
     }
 
 
+def _run_cli_subprocess(argv: list[str], fake_home: Path) -> subprocess.CompletedProcess:
+    """Run the harness CLI in a FRESH subprocess (fake HOME + provider env).
+
+    The Adv-1 fix makes ``main()`` refuse to rebind an already-imported
+    ``sage_plugin.db`` engine, so happy-path CLI runs must execute in a
+    process where ``sage_plugin`` has not been imported yet -- the same
+    isolation ``test_repeated_in_process_main_calls`` uses (the pytest
+    session's conftest imports ``sage_plugin.db`` at session start).
+    """
+    env = {**os.environ, "HOME": str(fake_home), "SAGE_BENCH_LLM_PROVIDER": "fake"}
+    env.pop("SAGE_DATABASE_URL", None)
+    return subprocess.run(
+        [sys.executable, str(HARNESS_SCRIPT), *argv],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env=env,
+    )
+
+
 # ---------------------------------------------------------------------------
 # No-provider skip
 # ---------------------------------------------------------------------------
@@ -161,25 +187,17 @@ def test_less_than_two_families_cli_error(h, monkeypatch, scratch_dir, capsys):
 # ---------------------------------------------------------------------------
 
 
-def test_fake_adapter_end_to_end(h, monkeypatch, scratch_dir):
-    monkeypatch.setenv("SAGE_BENCH_LLM_PROVIDER", "fake")
+def test_fake_adapter_end_to_end(h, scratch_dir):
     cfg = scratch_dir / "adapters.json"
     cfg.write_text(json.dumps(_adapters_config()))
     out_dir = scratch_dir / "out"
-    assert (
-        h.main(
-            [
-                "--adapters",
-                str(cfg),
-                "--output",
-                str(out_dir),
-                "--variants",
-                "v01,v12",
-                "--with-examples",
-            ]
-        )
-        == 0
+    fake_home = scratch_dir / "fakehome"
+    fake_home.mkdir()
+    completed = _run_cli_subprocess(
+        ["--adapters", str(cfg), "--output", str(out_dir), "--variants", "v01,v12", "--with-examples"],
+        fake_home,
     )
+    assert completed.returncode == 0, completed.stderr
     artifact = json.loads((out_dir / "model_eval_harness.json").read_text())
     markdown = (out_dir / "model_eval_harness.md").read_text()
     rows = artifact["rows"]
@@ -257,26 +275,17 @@ def test_fake_adapter_end_to_end(h, monkeypatch, scratch_dir):
 # ---------------------------------------------------------------------------
 
 
-def test_decoder_assisted_counts_expansion_tokens(h, monkeypatch, scratch_dir):
-    monkeypatch.setenv("SAGE_BENCH_LLM_PROVIDER", "fake")
+def test_decoder_assisted_counts_expansion_tokens(h, scratch_dir):
     cfg = scratch_dir / "adapters.json"
     cfg.write_text(json.dumps(_adapters_config()))
+    fake_home = scratch_dir / "fakehome"
+    fake_home.mkdir()
     out_dir = scratch_dir / "decoder-assisted"
-    assert (
-        h.main(
-            [
-                "--adapters",
-                str(cfg),
-                "--output",
-                str(out_dir),
-                "--variants",
-                "v01",
-                "--decoder-mode",
-                "decoder-assisted",
-            ]
-        )
-        == 0
+    completed = _run_cli_subprocess(
+        ["--adapters", str(cfg), "--output", str(out_dir), "--variants", "v01", "--decoder-mode", "decoder-assisted"],
+        fake_home,
     )
+    assert completed.returncode == 0, completed.stderr
     rows = json.loads((out_dir / "model_eval_harness.json").read_text())["rows"]
     assert rows
     for row in rows:
@@ -293,9 +302,10 @@ def test_decoder_assisted_counts_expansion_tokens(h, monkeypatch, scratch_dir):
 
     # direct-symbolic (default) adds no expansion tokens
     out_dir_plain = scratch_dir / "direct-symbolic"
-    assert (
-        h.main(["--adapters", str(cfg), "--output", str(out_dir_plain), "--variants", "v01"]) == 0
+    completed_plain = _run_cli_subprocess(
+        ["--adapters", str(cfg), "--output", str(out_dir_plain), "--variants", "v01"], fake_home
     )
+    assert completed_plain.returncode == 0, completed_plain.stderr
     rows_plain = json.loads((out_dir_plain / "model_eval_harness.json").read_text())["rows"]
     for row in rows_plain:
         assert row["decoder_configuration"] == "direct symbolic"
@@ -507,16 +517,19 @@ def test_missing_adapters_file_exit_2(h, monkeypatch, capsys):
     assert "no such adapters file" in capsys.readouterr().err
 
 
-def test_artifacts_deterministic_modulo_latency(h, monkeypatch, scratch_dir):
+def test_artifacts_deterministic_modulo_latency(scratch_dir):
     """F6: two runs produce byte-identical JSON artifacts once the measured
     *_latency_ms row values are dropped, and byte-identical .md artifacts."""
-    monkeypatch.setenv("SAGE_BENCH_LLM_PROVIDER", "fake")
     cfg = scratch_dir / "adapters.json"
     cfg.write_text(json.dumps(_adapters_config()))
+    fake_home = scratch_dir / "fakehome"
+    fake_home.mkdir()
     out_a = scratch_dir / "run-a"
     out_b = scratch_dir / "run-b"
-    assert h.main(["--adapters", str(cfg), "--output", str(out_a), "--variants", "v01,v09"]) == 0
-    assert h.main(["--adapters", str(cfg), "--output", str(out_b), "--variants", "v01,v09"]) == 0
+    run_a = _run_cli_subprocess(["--adapters", str(cfg), "--output", str(out_a), "--variants", "v01,v09"], fake_home)
+    assert run_a.returncode == 0, run_a.stderr
+    run_b = _run_cli_subprocess(["--adapters", str(cfg), "--output", str(out_b), "--variants", "v01,v09"], fake_home)
+    assert run_b.returncode == 0, run_b.stderr
 
     def _strip_latency(value: Any) -> Any:
         # mirror the stage-2 convention (test_compression_benchmark): measured
@@ -560,3 +573,185 @@ def test_hygiene_timeout_variants_and_stripping(h, monkeypatch, scratch_dir, cap
     for spec in normalized.values():
         assert spec["family"] == spec["family"].strip()
         assert spec["version"] == spec["version"].strip()
+
+
+# ---------------------------------------------------------------------------
+# Round-2 hardening regression tests (reviewer F8 + adversary Adv-1..Adv-6)
+# ---------------------------------------------------------------------------
+
+
+def test_scratch_db_per_process_unique_and_concurrent_runs(h, scratch_dir):
+    """F8/Adv-2: the scratch DB path embeds the pid (per-process unique), so
+    two CONCURRENT harness CLI runs (spawned before either finishes, distinct
+    --output dirs) both succeed instead of racing on a shared database file."""
+    path = h._scratch_db_path()
+    assert path.name == f"model_eval_harness-{os.getpid()}.db"
+    assert str(os.getpid()) in path.name
+    assert path.parent.name == ".sage-bench"
+
+    cfg = scratch_dir / "adapters.json"
+    cfg.write_text(json.dumps(_adapters_config()))
+    fake_home = scratch_dir / "fakehome"
+    fake_home.mkdir()
+    env = {**os.environ, "HOME": str(fake_home), "SAGE_BENCH_LLM_PROVIDER": "fake"}
+    env.pop("SAGE_DATABASE_URL", None)
+    base = [sys.executable, str(HARNESS_SCRIPT), "--adapters", str(cfg), "--variants", "v01"]
+    procs = [
+        subprocess.Popen(
+            [*base, "--output", str(scratch_dir / "outA")],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        ),
+        subprocess.Popen(
+            [*base, "--output", str(scratch_dir / "outB")],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        ),
+    ]
+    for label, proc in zip(("A", "B"), procs, strict=True):
+        _out, err = proc.communicate(timeout=300)
+        assert proc.returncode == 0, f"concurrent run {label} failed rc={proc.returncode}: {err}"
+        assert "OperationalError" not in err
+    assert (scratch_dir / "outA" / "model_eval_harness.json").exists()
+    assert (scratch_dir / "outB" / "model_eval_harness.json").exists()
+
+
+def test_run_harness_refuses_prebound_sage_plugin_db(scratch_dir):
+    """Adv-1: when sage_plugin.db is already imported with an engine bound to
+    a DIFFERENT database than SAGE_DATABASE_URL, run_harness() must refuse
+    with a RuntimeError and must NOT drop_all the pre-bound database (a
+    sentinel table must survive)."""
+    cfg = scratch_dir / "adapters.json"
+    cfg.write_text(json.dumps(_adapters_config()))
+    sentinel_db = scratch_dir / "sentinel.db"
+    fake_home = scratch_dir / "fakehome"
+    fake_home.mkdir()
+    script = scratch_dir / "prebound.py"
+    script.write_text(
+        "import importlib.util, json, os, sys\n"
+        "from pathlib import Path\n"
+        "from sqlalchemy import text\n"
+        f"ROOT = Path({str(ROOT)!r})\n"
+        "sys.path.insert(0, str(ROOT / 'src')); sys.path.insert(0, str(ROOT / 'scripts'))\n"
+        f"HARNESS = {str(HARNESS_SCRIPT)!r}\n"
+        f"SENTINEL_DB = {str(sentinel_db)!r}\n"
+        f"CFG = {str(cfg)!r}\n"
+        "# pre-import sage_plugin bound to a USER database holding a sentinel table\n"
+        "os.environ['SAGE_DATABASE_URL'] = 'sqlite:///' + SENTINEL_DB\n"
+        "import sage_plugin.db as db\n"
+        "import sage_plugin.db_models  # register tables\n"
+        "# simulate a pre-existing USER db: only the sentinel table exists (no\n"
+        "# sage tables yet) -- any message_audit appearing later is pollution\n"
+        "with db.engine.begin() as conn:\n"
+        "    conn.execute(text('CREATE TABLE sentinel_marker (id INTEGER PRIMARY KEY)'))\n"
+        "    conn.execute(text('INSERT INTO sentinel_marker VALUES (1)'))\n"
+        "spec = importlib.util.spec_from_file_location('model_eval_harness', HARNESS)\n"
+        "h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)\n"
+        "# point SAGE_DATABASE_URL at a DIFFERENT database than the bound engine\n"
+        "os.environ['SAGE_DATABASE_URL'] = 'sqlite:///' + SENTINEL_DB + '-other'\n"
+        "adapters = json.loads(Path(CFG).read_text())\n"
+        "try:\n"
+        "    h.run_harness(adapters, variants=['v01'])\n"
+        "    print('RESULT: NO_REFUSAL')\n"
+        "except RuntimeError as exc:\n"
+        "    print('RESULT: REFUSED: ' + str(exc))\n"
+        "try:\n"
+        "    with db.engine.connect() as conn:\n"
+        "        n = conn.execute(text('SELECT COUNT(*) FROM sentinel_marker')).scalar()\n"
+        "    print('SENTINEL_COUNT=' + str(n))\n"
+        "except Exception as exc:\n"
+        "    print('SENTINEL_COUNT=ERROR:' + type(exc).__name__)\n"
+        "with db.engine.connect() as conn:\n"
+        "    audit = conn.execute(text(\"SELECT name FROM sqlite_master WHERE name='message_audit'\")).scalar()\n"
+        "print('MESSAGE_AUDIT=' + str(audit is not None))\n"
+    )
+    env = {**os.environ, "HOME": str(fake_home)}
+    env.pop("SAGE_DATABASE_URL", None)
+    completed = subprocess.run(
+        [sys.executable, str(script)], capture_output=True, text=True, timeout=300, env=env
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "RESULT: REFUSED" in completed.stdout, completed.stdout
+    assert "sage_plugin" in completed.stdout, completed.stdout
+    assert "SENTINEL_COUNT=1" in completed.stdout, completed.stdout
+    assert "MESSAGE_AUDIT=False" in completed.stdout, completed.stdout
+
+
+def test_adapter_latency_ms_validated(h, monkeypatch):
+    """Adv-3: adapter-supplied latency_ms is validated like every other
+    numeric field -- nan / negative / string values raise an adapter-naming
+    RuntimeError instead of silently poisoning rows."""
+    monkeypatch.setenv("SAGE_BENCH_LLM_PROVIDER", "fake")
+    cases = [
+        (
+            "latency_ms nan",
+            "import json,sys,math; print(json.dumps({'task_success': 1.0, 'input_tokens': 1, 'output_tokens': 1, 'provider_cost_usd': 0.0, 'latency_ms': float('nan')}))",
+        ),
+        (
+            "latency_ms -5",
+            "import json,sys; print(json.dumps({'task_success': 1.0, 'input_tokens': 1, 'output_tokens': 1, 'provider_cost_usd': 0.0, 'latency_ms': -5.0}))",
+        ),
+        (
+            "latency_ms abc",
+            "import json,sys; print(json.dumps({'task_success': 1.0, 'input_tokens': 1, 'output_tokens': 1, 'provider_cost_usd': 0.0, 'latency_ms': 'abc'}))",
+        ),
+    ]
+    for name, tail in cases:
+        with pytest.raises(RuntimeError, match="acme-bad") as exc_info:
+            h.run_harness(_two_family_config(tail), variants=["v01"], timeout=30)
+        assert "latency_ms" in str(exc_info.value), name
+        assert "acme-bad" in str(exc_info.value), name
+
+
+def test_finite_float_rejects_bools(h, monkeypatch):
+    """Adv-4: JSON booleans (task_success: true/false, provider_cost_usd:
+    true) must raise an adapter-naming RuntimeError, never silently coerce to
+    1.0/0.0 (bool is an int subclass and float(True) == 1.0)."""
+    monkeypatch.setenv("SAGE_BENCH_LLM_PROVIDER", "fake")
+    cases = [
+        (
+            "task_success true",
+            "import json; print(json.dumps({'task_success': True, 'input_tokens': 1, 'output_tokens': 1, 'provider_cost_usd': 0.0}))",
+        ),
+        (
+            "task_success false",
+            "import json; print(json.dumps({'task_success': False, 'input_tokens': 1, 'output_tokens': 1, 'provider_cost_usd': 0.0}))",
+        ),
+        (
+            "provider_cost_usd true",
+            "import json; print(json.dumps({'task_success': 1.0, 'input_tokens': 1, 'output_tokens': 1, 'provider_cost_usd': True}))",
+        ),
+    ]
+    for name, tail in cases:
+        with pytest.raises(RuntimeError, match="acme-bad") as exc_info:
+            h.run_harness(_two_family_config(tail), variants=["v01"], timeout=30)
+        assert "acme-bad" in str(exc_info.value), name
+
+
+def test_timeout_nan_inf_rejected(h, capsys):
+    """Adv-5: --timeout nan/inf are rejected by argparse (exit 2) via
+    math.isfinite, not accepted and later misinterpreted; a finite positive
+    value still parses (no provider -> clean skip)."""
+    for bad in ("nan", "inf", "-inf"):
+        with pytest.raises(SystemExit) as excinfo:
+            h.main(["--timeout", bad])
+        assert excinfo.value.code == 2, bad
+    assert h.main(["--timeout", "5.0"]) == 0
+    assert "not run, no provider" in capsys.readouterr().out
+
+
+def test_missing_adapters_leaves_no_output_dir(h, monkeypatch, scratch_dir, capsys):
+    """Adv-6: when the adapters file is missing, --output must NOT be
+    created -- the output dir is only made after the adapters config loads."""
+    monkeypatch.setenv("SAGE_BENCH_LLM_PROVIDER", "fake")
+    out_dir = scratch_dir / "must-not-exist"
+    assert (
+        h.main(["--adapters", "/nonexistent/no-such.json", "--output", str(out_dir), "--variants", "v01"])
+        == 2
+    )
+    assert "no such adapters file" in capsys.readouterr().err
+    assert not out_dir.exists()

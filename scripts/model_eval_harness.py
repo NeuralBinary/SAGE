@@ -114,11 +114,13 @@ deterministically::
 
 Raw artifacts (``--output <dir>``) are written OUTSIDE the repository:
 ``model_eval_harness.json`` (per-exchange rows + table rows + deltas) and
-``model_eval_harness.md``.  The scratch codec database lives at
-``~/.sage-bench/model_eval_harness.db`` -- never inside the output dir -- and
-is stable for the lifetime of the process (it is never deleted while the
-module-level sqlalchemy engine may hold pooled connections to it); it is
-removed at process exit.  The output dir contains only the two artifacts.
+``model_eval_harness.md``.  The scratch codec database lives at a
+per-process-unique path ``~/.sage-bench/model_eval_harness-<pid>.db`` (the
+pid suffix keeps concurrent harness processes on separate files) -- never
+inside the output dir -- and is stable for the lifetime of the process (it is
+never deleted while the module-level sqlalchemy engine may hold pooled
+connections to it); it is removed at process exit.  The output dir contains
+only the two artifacts.
 
 Determinism: two runs produce byte-identical printed tables, ``.md``
 artifacts and JSON artifacts except for the measured per-adapter-call
@@ -129,8 +131,11 @@ benchmark's fixed timestamp.
 ``run_harness`` (the public API) refuses to run unless ``SAGE_DATABASE_URL``
 is set to a writable scratch database path -- it never operates on the
 ambient default database (``~/sage.db``); ``main()`` sets this up
-automatically.  ``--timeout`` must be > 0, an empty ``--variants`` value is
-an error, and ``family``/``version`` values are whitespace-stripped on load.
+automatically.  It also refuses when ``sage_plugin.db`` is already imported
+with an engine bound to a different database than ``SAGE_DATABASE_URL`` (the
+module-level engine cannot be rebound in this process).  ``--timeout`` must
+be a positive finite number, an empty ``--variants`` value is an error, and
+``family``/``version`` values are whitespace-stripped on load.
 
 Run it (provider configured):
 
@@ -181,8 +186,13 @@ _ALL_VARIANT_IDS = [f"v{index:02d}" for index in range(1, 13)]
 
 
 def _scratch_db_path() -> Path:
-    """Stable per-process scratch database path (never deleted mid-process)."""
-    return Path.home() / ".sage-bench" / "model_eval_harness.db"
+    """Per-process-unique scratch database path (never deleted mid-process).
+
+    The pid suffix keeps concurrent harness processes on separate files: a
+    process's atexit cleanup only ever touches its own file, and per-variant
+    schema resets can never race on a shared database.
+    """
+    return Path.home() / ".sage-bench" / f"model_eval_harness-{os.getpid()}.db"
 
 
 def _cleanup_scratch_db() -> None:
@@ -443,6 +453,8 @@ def _finite_float(
 ) -> float:
     """Coerce to a finite float within [minimum, maximum]; adapter-naming
     RuntimeError on any violation (never silently promotes garbage)."""
+    if isinstance(raw, bool):
+        raise RuntimeError(f"adapter {identity}: {key} must be a finite number, got {raw!r}")
     try:
         value = float(raw)
     except (TypeError, ValueError, OverflowError) as exc:
@@ -533,7 +545,7 @@ def _row_from_result(
         "semantic_loss": _finite_float(result.get("semantic_loss", 0.0), identity, "semantic_loss"),
         "task_success": _finite_float(success, identity, "task_success", minimum=0.0, maximum=1.0),
         "critical_fact_recall": _critical_fact_recall(cb, result, exchange, identity),
-        "latency_ms": float(result.get("latency_ms", 0.0)),
+        "latency_ms": _finite_float(result.get("latency_ms", 0.0), identity, "latency_ms", minimum=0.0),
     }
 
 
@@ -625,6 +637,65 @@ def _format_delta_table(deltas: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _urls_point_at_same_database(engine_url: Any, env_url: str) -> bool:
+    """True when the two database URLs target the same database.
+
+    SQLite file paths are resolved so equivalent spellings (absolute vs
+    relative, symlinked) compare equal; non-sqlite URLs compare by their
+    normalized rendering.
+    """
+    try:
+        from sqlalchemy.engine import make_url
+
+        engine_parsed = make_url(str(engine_url))
+        env_parsed = make_url(env_url)
+    except Exception:
+        return str(engine_url) == env_url
+    if engine_parsed.drivername != env_parsed.drivername:
+        return False
+    if engine_parsed.drivername == "sqlite":
+        engine_db, env_db = engine_parsed.database, env_parsed.database
+        if engine_db is None or env_db is None:
+            return engine_db == env_db
+        if engine_db == ":memory:" or env_db == ":memory:":
+            return engine_db == env_db
+        try:
+            return Path(engine_db).resolve() == Path(env_db).resolve()
+        except OSError:
+            return engine_db == env_db
+    return str(engine_parsed) == str(env_parsed)
+
+
+def _prebound_sage_plugin_conflict() -> str | None:
+    """Describe a ``sage_plugin.db`` engine that cannot be rebound, else None.
+
+    ``sage_plugin.db`` creates its module-level engine at import time; if it
+    is already imported and bound to a database other than the one
+    ``SAGE_DATABASE_URL`` names, resetting the schema would hit the pre-bound
+    database (data loss), so the harness must refuse instead.
+    """
+    db_module = sys.modules.get("sage_plugin.db")
+    if db_module is None:
+        return None
+    engine = getattr(db_module, "engine", None)
+    if engine is None:
+        return None
+    engine_url = getattr(engine, "url", None)
+    if engine_url is None:
+        return None
+    env_url = os.environ.get("SAGE_DATABASE_URL", "").strip()
+    if _urls_point_at_same_database(engine_url, env_url):
+        return None
+    return (
+        "sage_plugin.db is already imported and its engine is bound to "
+        f"{engine_url!r}, which differs from SAGE_DATABASE_URL ({env_url!r}); "
+        "the module-level engine cannot be rebound in this process, so the "
+        "harness refuses to run (a schema reset would otherwise hit the "
+        "pre-bound database). Run in a fresh process or set SAGE_DATABASE_URL "
+        "before the first sage_plugin import."
+    )
+
+
 def run_harness(
     adapters: dict[str, Any],
     *,
@@ -637,7 +708,10 @@ def run_harness(
 
     Requires ``SAGE_DATABASE_URL`` to be set to a writable scratch database
     path (the harness refuses to run against the ambient default ``~/sage.db``;
-    the CLI ``main()`` sets it up automatically).
+    the CLI ``main()`` sets it up automatically).  If ``sage_plugin.db`` is
+    already imported with an engine bound to a different database than
+    ``SAGE_DATABASE_URL``, refuses with ``RuntimeError`` (the module-level
+    engine cannot be rebound in this process).
 
     Raises ``ValueError`` for invalid configuration (including configs with
     fewer than 2 distinct model families) and ``RuntimeError`` for adapter
@@ -650,6 +724,9 @@ def run_harness(
             "path (e.g. sqlite:///<scratch>/sage_bench.db) before running the "
             "harness -- refusing to touch the ambient default database (~/sage.db)"
         )
+    conflict = _prebound_sage_plugin_conflict()
+    if conflict is not None:
+        raise RuntimeError(conflict)
     validate_adapters(adapters)
     if decoder_mode not in DECODER_MODES:
         raise ValueError(f"decoder_mode must be one of {DECODER_MODES}")
@@ -723,10 +800,12 @@ def _write_artifacts(out_dir: str | Path, results: dict[str, Any]) -> None:
 
 
 def _positive_timeout(value: str) -> float:
-    """argparse type: ``--timeout`` must be a positive number of seconds."""
+    """argparse type: ``--timeout`` must be a positive, finite number of
+    seconds (``nan``/``inf`` are rejected -- ``nan <= 0`` is False, so a bare
+    ``<= 0`` check would let them through)."""
     parsed = float(value)
-    if parsed <= 0:
-        raise argparse.ArgumentTypeError(f"--timeout must be > 0, got {value!r}")
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise argparse.ArgumentTypeError(f"--timeout must be a positive finite number, got {value!r}")
     return parsed
 
 
@@ -779,7 +858,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     # Reject an --output path that exists as a FILE before anything runs (no
-    # traceback, no wasted adapter calls); create the directory up front.
+    # traceback, no wasted adapter calls).  The directory itself is only
+    # created AFTER the adapters config has loaded successfully, so a missing
+    # adapters file never leaves an empty output dir behind.
     output_dir: Path | None = None
     if args.output is not None:
         out: Path = args.output
@@ -789,7 +870,6 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
-        out.mkdir(parents=True, exist_ok=True)
         output_dir = out
 
     try:
@@ -803,6 +883,9 @@ def main(argv: list[str] | None = None) -> int:
     except (ValueError, OSError) as exc:
         print(f"model evaluation harness: error: {exc}", file=sys.stderr)
         return 2
+
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
 
     variants: list[str] | None = None
     if args.variants is not None:
