@@ -78,11 +78,13 @@ def main() -> None:
     args = parser.parse_args()
 
     verify_round_trip(args.url, args.api_key, args.workspace, "baseline", args.ca_cert)
-    compose(args.compose_file, "pause", "sage-b")
+    # Stop (not pause) the worker: a paused process keeps TCP alive so the load
+    # balancer waits on it; a stopped worker fails over via connection refusal.
+    compose(args.compose_file, "stop", "sage-b")
     try:
-        verify_round_trip(args.url, args.api_key, args.workspace, "worker-paused", args.ca_cert)
+        verify_round_trip(args.url, args.api_key, args.workspace, "worker-stopped", args.ca_cert)
     finally:
-        compose(args.compose_file, "unpause", "sage-b")
+        compose(args.compose_file, "start", "sage-b")
 
     if args.disrupt_postgres:
         compose(args.compose_file, "stop", "postgres")

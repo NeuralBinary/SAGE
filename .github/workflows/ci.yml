@@ -133,6 +133,7 @@ jobs:
         working-directory: integrations/openclaw
       - run: npm run build
         working-directory: integrations/openclaw
+      - run: python -m pip install setuptools wheel
       - run: sage-tck --json
       - run: python scripts/conformance_matrix.py
       - run: python scripts/differential_fuzz.py --iterations 500
