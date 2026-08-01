@@ -9,7 +9,7 @@ SAGE is a vendor-neutral semantic communication runtime and durable context bus 
 | Repository | https://github.com/NeuralBinary/SAGE |
 | Credits | @NeuralBinary, @ro0ti |
 | Version | v0.2 |
-| Package version | 0.2.3 |
+| Package version | 0.2.4 |
 | Protocol | `sage/0.2` |
 | Wire | `2` |
 | License | MIT |
@@ -71,15 +71,15 @@ docker compose -f docker-compose.quickstart.yml exec -T sage \
 
 ### Python release install
 
-Python 3.11 or newer is required. Download the v0.2.3 release wheel from the
-[GitHub release](https://github.com/NeuralBinary/SAGE/releases/tag/v0.2.3), then
+Python 3.11 or newer is required. Download the v0.2.4 release wheel from the
+[GitHub release](https://github.com/NeuralBinary/SAGE/releases/tag/v0.2.4), then
 install it and start a local service with authentication disabled only on a
 trusted interface:
 
 ```bash
 python -m venv .venv
 . .venv/bin/activate              # Windows: .venv\Scripts\Activate.ps1
-python -m pip install https://github.com/NeuralBinary/SAGE/releases/download/v0.2.3/sage_agent_protocol-0.2.3-py3-none-any.whl
+python -m pip install https://github.com/NeuralBinary/SAGE/releases/download/v0.2.4/sage_agent_protocol-0.2.4-py3-none-any.whl
 export SAGE_AUTH_REQUIRED=false  # PowerShell: $env:SAGE_AUTH_REQUIRED="false"
 sage-api
 ```
@@ -99,13 +99,13 @@ itself, which exercises the same durable lifecycle as two-agent delivery.
 
 ### Hermes plugin
 
-Download `sage-hermes-plugin-v0.2.3.zip` from the
-[v0.2.3 GitHub release](https://github.com/NeuralBinary/SAGE/releases/tag/v0.2.3),
+Download `sage-hermes-plugin-v0.2.4.zip` from the
+[v0.2.4 GitHub release](https://github.com/NeuralBinary/SAGE/releases/tag/v0.2.4),
 then install the plugin:
 
 ```bash
-unzip sage-hermes-plugin-v0.2.3.zip
-cd sage-hermes-plugin-v0.2.3
+unzip sage-hermes-plugin-v0.2.4.zip
+cd sage-hermes-plugin-v0.2.4
 ./install.sh
 ```
 
@@ -115,12 +115,12 @@ Windows instructions are in `integrations/hermes/README.md`.
 
 ### OpenClaw plugin
 
-Download `sage-agent-openclaw-sage-0.2.3.tgz` from the
-[v0.2.3 GitHub release](https://github.com/NeuralBinary/SAGE/releases/tag/v0.2.3),
+Download `sage-agent-openclaw-sage-0.2.4.tgz` from the
+[v0.2.4 GitHub release](https://github.com/NeuralBinary/SAGE/releases/tag/v0.2.4),
 then install the native plugin:
 
 ```bash
-openclaw plugins install npm-pack:./sage-agent-openclaw-sage-0.2.3.tgz
+openclaw plugins install npm-pack:./sage-agent-openclaw-sage-0.2.4.tgz
 openclaw plugins enable sage
 openclaw plugins inspect sage --runtime --json
 ```
@@ -429,7 +429,7 @@ python scripts/conformance_matrix.py
 Version identity is locked across `pyproject.toml`, `plugin.json`, the Python
 package, the Hermes manifest and adapter, the OpenClaw package and manifest, the
 spec, the TCK, and this documentation. Release commits prepare that identity
-(e.g. `release: prepare v0.2.3`).
+(e.g. `release: prepare v0.2.4`).
 
 Pushing a tag matching `v*` triggers the `.github/workflows/release.yml`
 workflow, which:
@@ -447,16 +447,16 @@ workflow, which:
 Release assets:
 
 ```text
-Python/runtime   -> sage_agent_protocol-0.2.3-py3-none-any.whl
-Hermes Agent     -> sage-hermes-plugin-v0.2.3.zip
-OpenClaw         -> sage-agent-openclaw-sage-0.2.3.tgz
-Source           -> sage-plugin-v0.2.3.zip
-Verification     -> SAGE-v0.2.3-VERIFICATION.md
-Checksums        -> SAGE-v0.2.3-SHA256SUMS.txt
+Python/runtime   -> sage_agent_protocol-0.2.4-py3-none-any.whl
+Hermes Agent     -> sage-hermes-plugin-v0.2.4.zip
+OpenClaw         -> sage-agent-openclaw-sage-0.2.4.tgz
+Source           -> sage-plugin-v0.2.4.zip
+Verification     -> SAGE-v0.2.4-VERIFICATION.md
+Checksums        -> SAGE-v0.2.4-SHA256SUMS.txt
 ```
 
 The release notes and verification records for the current release are
-`RELEASE-v0.2.3.md` and `VERIFICATION.md`.
+`RELEASE-v0.2.4.md` and `VERIFICATION.md`.
 
 ## Repository structure
 

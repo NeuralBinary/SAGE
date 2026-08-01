@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.4
+
+- Patch release over 0.2.3. Protocol `sage/0.2`, wire version `2`, migration baseline `0001_sage_0_2`, and the 13 normative TCK vectors are unchanged.
+- Fixes the MCP integration for repeated application startups (Issue #11): the FastMCP server is now built fresh on every app lifespan behind a stable delegating mount at `/mcp`, with an owner-guarded live-install stack so overlapping lifespans hand the mount back instead of clobbering it. Repeated app startups with the `mcp` extra now work, and pytest phases plus the release workflow install `[dev,mcp,bench,otel]` again.
+- Hardens the latency gate on shared CI runners: `--best-of 3` rounds (was best-of-2), with all limits unchanged.
+- Ships the wiki-styled GitHub Pages documentation site (MkDocs Material: sidebar navigation, search, dark mode) as the project's public docs.
+- Updates documentation, release artifacts, and verification status for v0.2.4.
+
 ## 0.2.3
 
 - Patch release over 0.2.2. Protocol `sage/0.2`, wire version `2`, migration baseline `0001_sage_0_2`, and the 13 normative TCK vectors are unchanged.
