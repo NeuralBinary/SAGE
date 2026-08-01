@@ -5,24 +5,23 @@ from typing import Any
 from .a2a_adapter import pack_data_part, unpack_data_part
 from .bus import SemanticBus
 from .codec import SageCodec
+from .compiler import compile_content
 from .config import get_settings
-from .db import SessionLocal, init_db
-from .evals import run_eval
 from .conformance import run_tck, run_wire_fuzz
+from .db import SessionLocal, init_db
 from .economics import run_sage_economics_benchmark
-from .protocol_spec import SAGE_PROTOCOL, SAGE_WIRE_VERSION
+from .evals import run_eval
 from .knowledge import KnowledgeStore
 from .patterns import PatternStore
-from .compiler import compile_content
+from .protocol_spec import SAGE_PROTOCOL, SAGE_WIRE_VERSION
 from .references import ReferenceStore
 from .schemas import (
     Budget,
     Capabilities,
+    EconomicsBenchmarkRequest,
     EncodeRequest,
     EvalCase,
     EvalRequest,
-    EconomicsBenchmarkRequest,
-    Packet,
     Provenance,
     StatePatchRequest,
 )
@@ -108,6 +107,7 @@ def build_server() -> Any:
     def sage_explain(packet_id: str) -> dict[str, Any]:
         """Explain why SAGE selected refs, deltas, semantic codes, cache or fallback behavior."""
         from sqlalchemy import select
+
         from .db_models import MessageAudit
 
         with SessionLocal() as db:
@@ -367,6 +367,7 @@ def build_server() -> Any:
     def sage_replay(run_id: str) -> dict[str, Any]:
         """Replay the exact packet history and decisions for a multi-agent run."""
         from sqlalchemy import select
+
         from .db_models import MessageAudit
 
         with SessionLocal() as db:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select, update
@@ -15,12 +15,12 @@ from .db_models import BusMessage, IdempotencyRecord, QuotaCounter
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _window_start(now: datetime, seconds: int) -> datetime:
     epoch = int(now.timestamp())
-    return datetime.fromtimestamp(epoch - (epoch % seconds), tz=timezone.utc)
+    return datetime.fromtimestamp(epoch - (epoch % seconds), tz=UTC)
 
 
 def request_hash(payload: Any) -> str:

@@ -1,31 +1,56 @@
 from __future__ import annotations
 
 from typing import Any
+
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+
+from .api_helpers import bus_response
 from .bus import SemanticBus
+from .checkpoints import CheckpointStore
+from .codebook_releases import CodebookReleaseStore
 from .config import get_settings
 from .db import get_db
 from .db_models import Contradiction
+from .economics import run_sage_economics_benchmark, score_observed_runs
+from .evals import run_eval
 from .facts import FactStore
 from .federation import FederationStore
 from .inspector import Inspector
 from .inspector_ui import render_inspector
-from .checkpoints import CheckpointStore
-from .codebook_releases import CodebookReleaseStore
+from .maintenance import cleanup
 from .merkle import CodebookMerkle
 from .reliability import ModelIdentityStore, ReliabilityMonitor
 from .routing import SemanticPubSub, SemanticRouter
-from .evals import run_eval
-from .economics import run_sage_economics_benchmark, score_observed_runs
-from .maintenance import cleanup
-from .schemas import BusMessageResponse, EvalRequest, EconomicsBenchmarkRequest, ObservedEconomicsRequest, ContradictionResolveRequest, FactPutRequest, FactResponse, FactInvalidateRequest, SubscriptionRequest, PublishRequest, AgentCapabilityRequest, RouteRequest, FederationPeerRequest, FederationImportRequest, ModelIdentityRequest, ModelIdentityResponse, MerkleSyncRequest, CodebookReleaseRequest, CheckpointResponse, ReliabilityResponse, NativeTokenGateRequest, NativeTokenGateResponse
+from .schemas import (
+    AgentCapabilityRequest,
+    BusMessageResponse,
+    CheckpointResponse,
+    CodebookReleaseRequest,
+    ContradictionResolveRequest,
+    EconomicsBenchmarkRequest,
+    EvalRequest,
+    FactInvalidateRequest,
+    FactPutRequest,
+    FactResponse,
+    FederationImportRequest,
+    FederationPeerRequest,
+    MerkleSyncRequest,
+    ModelIdentityRequest,
+    ModelIdentityResponse,
+    NativeTokenGateRequest,
+    NativeTokenGateResponse,
+    ObservedEconomicsRequest,
+    PublishRequest,
+    ReliabilityResponse,
+    RouteRequest,
+    SubscriptionRequest,
+)
 from .security import current_principal, enforce_agent_scope
 from .state import StateStore
-from .api_helpers import bus_response
 
 router = APIRouter()
 

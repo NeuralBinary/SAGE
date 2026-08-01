@@ -148,6 +148,7 @@ def test_pattern_status_can_be_manually_controlled():
 
 def test_pattern_rest_surface_is_end_to_end():
     from fastapi.testclient import TestClient
+
     from sage_plugin.main import app
 
     content = {"cause": "test_failure", "deployment": "blocked"}
@@ -187,6 +188,7 @@ def test_pattern_rest_surface_is_end_to_end():
 
 def test_negotiation_syncs_active_pattern_definitions_and_can_disable_patterns():
     from fastapi.testclient import TestClient
+
     from sage_plugin.main import app
 
     content = {"cause": "test_failure", "deployment": "blocked"}

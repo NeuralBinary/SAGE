@@ -4,6 +4,7 @@ import json
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from sage_plugin.a2a_adapter import agent_card, pack_message, unpack_message
 from sage_plugin.conformance import run_tck
@@ -25,7 +26,7 @@ def test_canonical_encoding_is_order_independent_and_stable():
 
 
 def test_wire_v2_rejects_unknown_fields_and_nonfinite_values():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         validate_wire_v2({"v": 2, "c": "global", "a": "report", "p": {}, "wat": 1})
     with pytest.raises(ValueError):
         canonical_json_bytes({"x": float("nan")})
@@ -75,6 +76,7 @@ def test_protocol_api_reports_frozen_v02_and_validates_vectors():
 
 def test_packaged_wire_schema_matches_reference_model():
     from importlib.resources import files
+
     from sage_plugin.protocol_spec import wire_schema
 
     packaged = json.loads(files("sage_plugin").joinpath("spec/schemas/wire-v2.schema.json").read_text(encoding="utf-8"))
@@ -86,7 +88,7 @@ def test_v02_is_the_only_supported_protocol_and_wire():
 
     assert SAGE_SUPPORTED_PROTOCOLS == ("sage/0.2",)
     assert SAGE_SUPPORTED_WIRES == (2,)
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError):
         validate_wire_v2({"v": 99, "c": "global", "a": "report", "p": {}})
 
 

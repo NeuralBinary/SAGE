@@ -1,10 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from .config import Settings
-from .protocol_spec import SAGE_WIRE_VERSION, canonical_json_bytes, canonical_msgpack_bytes, validate_wire_v2
+from .protocol_spec import (
+    SAGE_WIRE_VERSION,
+    canonical_json_bytes,
+    canonical_msgpack_bytes,
+    validate_wire_v2,
+)
 from .schemas import Atom, Packet, Provenance
 from .signing import verify_wire
 
@@ -68,7 +73,7 @@ class WireCodec:
                 raise ValueError("invalid packet signature")
         prov_raw = payload.get("p", {}) or {}
         observed = prov_raw.get("t")
-        observed_at = datetime.fromtimestamp(observed, timezone.utc).isoformat() if isinstance(observed, (int, float)) else str(observed) if observed else Provenance().observed_at
+        observed_at = datetime.fromtimestamp(observed, UTC).isoformat() if isinstance(observed, (int, float)) else str(observed) if observed else Provenance().observed_at
         prov = Provenance(
             source_ids=list(prov_raw.get("s") or []), observed_at=observed_at,
             confidence=float(prov_raw.get("q", 1.0)), derivation=str(prov_raw.get("d", "direct")), producer=prov_raw.get("p"),

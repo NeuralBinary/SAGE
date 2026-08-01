@@ -3,9 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import time
-from datetime import datetime, timedelta, timezone
-from tempfile import TemporaryDirectory
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -53,7 +53,7 @@ def run(messages: int) -> dict[str, int]:
             ref_store = ReferenceStore(db, settings)
             ref = ref_store.put({"secret": 1}, workspace="w", owner="s", ttl_seconds=1)
             grant = ref_store.grant_metadata(ref.id, actor="s", workspace="w")
-            grant.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            grant.expires_at = datetime.now(UTC) - timedelta(seconds=1)
             db.flush()
             try:
                 ref_store.resolve(ref.id, actor="s", workspace="w")

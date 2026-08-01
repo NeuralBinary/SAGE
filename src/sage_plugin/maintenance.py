@@ -1,18 +1,28 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from .config import Settings
-from .db_models import BusMessage, IdempotencyRecord, MessageAudit, PatternCandidate, QuotaCounter, Reference, ReferenceGrant, SemanticCache, SharedState
-from .reachability import reachable_states, reference_roots
+from .db_models import (
+    BusMessage,
+    IdempotencyRecord,
+    MessageAudit,
+    PatternCandidate,
+    QuotaCounter,
+    Reference,
+    ReferenceGrant,
+    SemanticCache,
+    SharedState,
+)
 from .patterns import PatternStore
+from .reachability import reachable_states, reference_roots
 
 
 def cleanup(db: Session, settings: Settings) -> dict[str, int]:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cache_result = db.execute(
         delete(SemanticCache).where(
             SemanticCache.expires_at.is_not(None),

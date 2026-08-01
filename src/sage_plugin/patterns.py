@@ -3,9 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
-from typing import Any, Iterable
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sqlalchemy import case, select
 from sqlalchemy.exc import IntegrityError
@@ -13,11 +13,28 @@ from sqlalchemy.orm import Session
 
 from .calibration import CalibrationStore
 from .codebook import Codebook
-from .compiler import SemanticUnit, normalize
+from .compiler import SemanticUnit
 from .config import Settings
-from .db_models import Concept, LearnedPattern, PatternCandidate, PatternEdge, PatternReceiverMetric, PatternSourceEvidence
+from .db_models import (
+    Concept,
+    LearnedPattern,
+    PatternCandidate,
+    PatternEdge,
+    PatternReceiverMetric,
+    PatternSourceEvidence,
+)
+from .pattern_policy import trust_ready
+from .pattern_policy import utility_score as calculate_utility_score
+from .pattern_structure import (
+    _literal_type,
+    _path_shape,
+    canonical_label,
+    composition_for,
+    estimated_savings,
+    pattern_signature,
+    slot_fingerprint,
+)
 from .reliability import ReliabilityMonitor
-from .pattern_policy import trust_ready, utility_score as calculate_utility_score
 from .resilience import QuotaManager
 
 
@@ -27,9 +44,6 @@ class PatternMatch:
     start: int
     end: int
     bindings: list[Any]
-
-
-from .pattern_structure import _literal_type, _path_shape, canonical_label, composition_for, estimated_savings, pattern_signature, slot_fingerprint
 
 
 class PatternStore:
@@ -116,7 +130,7 @@ class PatternStore:
         if len(matches) < 2:
             return None
         matches = sorted(matches, key=lambda m: m.start)
-        for left, right in zip(matches, matches[1:]):
+        for left, right in zip(matches, matches[1:], strict=False):
             if left.end != right.start:
                 continue
             span = units[left.start:right.end]
@@ -629,7 +643,7 @@ class PatternStore:
         metric.fidelity_sum += semantic_fidelity
         if abs(full_success - compressed_success) <= 1e-9 and semantic_fidelity >= self.settings.pattern_counterfactual_min_fidelity:
             metric.exact_equivalence_count += 1
-        metric.last_seen_at = datetime.now(timezone.utc)
+        metric.last_seen_at = datetime.now(UTC)
         equivalent = 1.0 if abs(full_success - compressed_success) <= 1e-9 and semantic_fidelity >= self.settings.pattern_counterfactual_min_fidelity else 0.0
         self.calibration.record(
             predicted=semantic_fidelity,
@@ -677,7 +691,7 @@ class PatternStore:
 
     def mark_used(self, pattern: LearnedPattern) -> None:
         pattern.use_count += 1
-        pattern.last_used_at = datetime.now(timezone.utc)
+        pattern.last_used_at = datetime.now(UTC)
         if pattern.status == "cooling":
             pattern.status = "active"
             pattern.cooling_since = None
@@ -715,7 +729,7 @@ class PatternStore:
         return promoted
 
     def garbage_collect(self, codebook: str | None = None) -> dict[str, int]:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         cooling_cutoff = now - timedelta(days=self.settings.pattern_gc_cooling_days)
         retire_cutoff = now - timedelta(days=self.settings.pattern_gc_retire_days)
         stmt = select(LearnedPattern)
@@ -725,7 +739,7 @@ class PatternStore:
         for pattern in self.db.scalars(stmt):
             last = pattern.last_used_at or pattern.updated_at or pattern.created_at
             if last.tzinfo is None:
-                last = last.replace(tzinfo=timezone.utc)
+                last = last.replace(tzinfo=UTC)
             if pattern.status == "active" and last < cooling_cutoff:
                 pattern.status = "cooling"
                 pattern.cooling_since = now

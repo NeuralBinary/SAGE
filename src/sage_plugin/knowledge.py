@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -103,7 +103,7 @@ class KnowledgeStore:
         item = self.db.scalar(select(ReceiverKnowledgeItem).where(ReceiverKnowledgeItem.workspace == workspace, ReceiverKnowledgeItem.receiver == receiver, ReceiverKnowledgeItem.kind == kind, ReceiverKnowledgeItem.value == value))
         if item is None:
             return False
-        item.stale_at = datetime.now(timezone.utc)
+        item.stale_at = datetime.now(UTC)
         return True
 
     def fingerprint(self, receiver: str | None, workspace: str = "default") -> str:

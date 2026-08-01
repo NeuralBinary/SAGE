@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -27,8 +27,8 @@ class CacheStore:
         if item.expires_at is not None:
             expires = item.expires_at
             if expires.tzinfo is None:
-                expires = expires.replace(tzinfo=timezone.utc)
-            if expires <= datetime.now(timezone.utc):
+                expires = expires.replace(tzinfo=UTC)
+            if expires <= datetime.now(UTC):
                 return None
         item.hit_count += 1
         return item
@@ -41,13 +41,13 @@ class CacheStore:
                 packet=packet,
                 decisions=decisions,
                 codebook_fingerprint=fingerprint,
-                expires_at=datetime.now(timezone.utc) + timedelta(seconds=self.ttl_seconds),
+                expires_at=datetime.now(UTC) + timedelta(seconds=self.ttl_seconds),
             )
             self.db.add(item)
         else:
             item.packet = packet
             item.decisions = decisions
             item.codebook_fingerprint = fingerprint
-            item.expires_at = datetime.now(timezone.utc) + timedelta(seconds=self.ttl_seconds)
+            item.expires_at = datetime.now(UTC) + timedelta(seconds=self.ttl_seconds)
         self.db.flush()
         return item

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -42,7 +43,7 @@ class CorpusRecord(BaseModel):
         receiver_prior: Any | None = None,
         expected: Any | None = None,
         metadata: dict[str, Any] | None = None,
-    ) -> "CorpusRecord":
+    ) -> CorpusRecord:
         identity = {
             "task_family": task_family,
             "task": task,

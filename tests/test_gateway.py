@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,7 +11,6 @@ from sage_plugin.codebook import Codebook
 from sage_plugin.codec import SageCodec
 from sage_plugin.config import Settings
 from sage_plugin.db import SessionLocal
-from sage_plugin.db_models import Reference
 from sage_plugin.main import app
 from sage_plugin.references import ReferenceAccessError, ReferenceExpiredError, ReferenceStore
 from sage_plugin.schemas import Budget, EncodeRequest
@@ -106,7 +105,7 @@ def test_private_encrypted_reference_acl_ttl_and_tier_policy():
             store.get(item.id, actor="agent-c")
         store.policy(item.id, actor="agent-a", workspace="default", tier="hot")
         assert item.tier == "hot"
-        item.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        item.expires_at = datetime.now(UTC) - timedelta(seconds=1)
         db.commit()
         with pytest.raises(ReferenceExpiredError):
             store.get(item.id, actor="agent-b")

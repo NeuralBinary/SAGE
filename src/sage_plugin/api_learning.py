@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from datetime import timezone
+from datetime import UTC
 from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from .api_helpers import concept_response
 from .calibration import CalibrationStore
 from .codebook import Codebook
 from .config import get_settings
@@ -14,9 +17,22 @@ from .knowledge import KnowledgeStore
 from .latent import pack_latent, unpack_latent
 from .patterns import PatternStore
 from .protocol_spec import SAGE_PROTOCOL
-from .schemas import CalibrationRecordRequest, CalibrationResponse, Capabilities, CounterfactualPatternRequest, LatentPackRequest, LatentPacket, LatentUnpackRequest, PatternCandidateResponse, PatternObserveRequest, PatternResponse, PatternStatusRequest, NegotiateRequest, NegotiateResponse
+from .schemas import (
+    CalibrationRecordRequest,
+    CalibrationResponse,
+    Capabilities,
+    CounterfactualPatternRequest,
+    LatentPacket,
+    LatentPackRequest,
+    LatentUnpackRequest,
+    NegotiateRequest,
+    NegotiateResponse,
+    PatternCandidateResponse,
+    PatternObserveRequest,
+    PatternResponse,
+    PatternStatusRequest,
+)
 from .security import current_principal, enforce_agent_scope
-from .api_helpers import concept_response
 
 router = APIRouter()
 
@@ -225,5 +241,5 @@ def receiver_knowledge(
         "known_refs": KnowledgeStore(db).known_refs(receiver, workspace),
         "current_state": item.current_state,
         "capabilities": item.capabilities,
-        "updated_at": item.updated_at.replace(tzinfo=item.updated_at.tzinfo or timezone.utc).isoformat(),
+        "updated_at": item.updated_at.replace(tzinfo=item.updated_at.tzinfo or UTC).isoformat(),
     }

@@ -4,7 +4,7 @@ import base64
 import hashlib
 import json
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -22,7 +22,7 @@ def canonical_bytes(value: Any) -> bytes:
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _extract_path(value: Any, path: str) -> Any:
@@ -113,7 +113,7 @@ class ReferenceStore:
         out: list[ReferenceGrant] = []
         for grant in grants:
             if grant.expires_at is not None:
-                expiry = grant.expires_at.replace(tzinfo=grant.expires_at.tzinfo or timezone.utc)
+                expiry = grant.expires_at.replace(tzinfo=grant.expires_at.tzinfo or UTC)
                 if expiry <= now:
                     continue
             out.append(grant)
@@ -234,7 +234,7 @@ class ReferenceStore:
         if item.invalidated_at is not None:
             raise ReferenceExpiredError("reference invalidated")
         if item.expires_at is not None:
-            expiry = item.expires_at.replace(tzinfo=item.expires_at.tzinfo or timezone.utc)
+            expiry = item.expires_at.replace(tzinfo=item.expires_at.tzinfo or UTC)
             if expiry <= _utcnow():
                 raise ReferenceExpiredError("reference expired")
         grants = self._active_grants(item.id, workspace)

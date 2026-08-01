@@ -9,7 +9,12 @@ from importlib.resources import files
 from typing import Any
 
 from .a2a_adapter import pack_data_part, unpack_data_part
-from .protocol_spec import canonical_digest, canonical_json_bytes, canonical_msgpack_bytes, validate_wire_v2
+from .protocol_spec import (
+    canonical_digest,
+    canonical_json_bytes,
+    canonical_msgpack_bytes,
+    validate_wire_v2,
+)
 
 
 @dataclass(frozen=True)

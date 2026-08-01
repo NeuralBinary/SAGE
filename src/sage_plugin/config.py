@@ -182,7 +182,7 @@ class Settings(BaseSettings):
         return value
 
     @model_validator(mode="after")
-    def validate_security(self) -> "Settings":
+    def validate_security(self) -> Settings:
         if not 4 <= self.semantic_lsh_bits <= 24:
             raise ValueError("semantic_lsh_bits must be in [4, 24]")
         if not 0 <= self.semantic_lsh_hamming <= 2:

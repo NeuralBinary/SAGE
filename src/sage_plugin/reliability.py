@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -13,7 +13,7 @@ from .db_models import LearnedPattern, ModelIdentity, PatternValidationEvidence,
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _identity_hash(payload: dict[str, Any]) -> str:
@@ -186,7 +186,7 @@ class ReliabilityMonitor:
         now = _utcnow()
         seconds = self.settings.pattern_drift_window_minutes * 60
         epoch = int(now.timestamp())
-        start = datetime.fromtimestamp(epoch - (epoch % seconds), tz=timezone.utc)
+        start = datetime.fromtimestamp(epoch - (epoch % seconds), tz=UTC)
         item = self.db.scalar(
             select(ReliabilityWindow).where(
                 ReliabilityWindow.workspace == workspace,

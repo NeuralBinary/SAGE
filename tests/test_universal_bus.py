@@ -1,10 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
+from pydantic import ValidationError
 
-from sage_plugin.a2a_adapter import SAGE_EXTENSION_URI, SAGE_MEDIA_TYPE, pack_data_part, unpack_data_part
+from sage_plugin.a2a_adapter import (
+    SAGE_EXTENSION_URI,
+    SAGE_MEDIA_TYPE,
+    pack_data_part,
+    unpack_data_part,
+)
 from sage_plugin.bus import SemanticBus
 from sage_plugin.codebook import Codebook
 from sage_plugin.config import Settings
@@ -51,7 +57,7 @@ def test_stale_claim_is_recoverable():
 
         first = bus.pull(receiver="worker", claim=True)
         assert len(first) == 1
-        first[0].claimed_at = datetime.now(timezone.utc) - timedelta(seconds=10)
+        first[0].claimed_at = datetime.now(UTC) - timedelta(seconds=10)
         db.commit()
 
         recovered = bus.pull(receiver="worker", claim=True)
@@ -80,7 +86,7 @@ def test_a2a_data_part_round_trip_and_rejects_non_v02():
     invalid_wire = {"v": 99, "a": "handoff", "x": [1, 2]}
     with pytest.raises(ValueError, match="sage/0.2"):
         unpack_data_part({"data": {"sageProtocol": "sage/9.9", "wire": invalid_wire}, "mediaType": "application/json"})
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         pack_data_part(invalid_wire)
 
 

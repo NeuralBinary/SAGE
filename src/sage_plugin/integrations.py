@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from .schemas import IntegrationConfigResponse, IntegrationProfile
 
-
 _PROFILES: dict[str, IntegrationProfile] = {
     "generic": IntegrationProfile(
         id="generic",

@@ -1,12 +1,20 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .db_models import BusMessage, MessageAudit, ReceiverKnowledge, ReceiverKnowledgeItem, ReferenceGrant, SharedState, StateCheckpoint
+from .db_models import (
+    BusMessage,
+    MessageAudit,
+    ReceiverKnowledge,
+    ReceiverKnowledgeItem,
+    ReferenceGrant,
+    SharedState,
+    StateCheckpoint,
+)
 
 
 def _refs_from_wire(wire: dict[str, Any]) -> set[str]:
@@ -26,10 +34,10 @@ def _states_from_wire(wire: dict[str, Any]) -> set[str]:
 
 
 def reference_roots(db: Session, *, retain_audit: bool = True) -> set[str]:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     roots: set[str] = set()
     for grant in db.scalars(select(ReferenceGrant).where(ReferenceGrant.invalidated_at.is_(None))):
-        if grant.expires_at is None or grant.expires_at.replace(tzinfo=grant.expires_at.tzinfo or timezone.utc) > now:
+        if grant.expires_at is None or grant.expires_at.replace(tzinfo=grant.expires_at.tzinfo or UTC) > now:
             roots.add(grant.ref_id)
     for item in db.scalars(select(BusMessage).where(BusMessage.status != "acked")):
         roots |= _refs_from_wire(item.wire or {})

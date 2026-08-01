@@ -6,16 +6,16 @@ from sqlalchemy import select
 
 from .bus import SemanticBus
 from .codec import SageCodec
+from .compiler import compile_content
 from .config import Settings, get_settings
 from .db import SessionLocal
 from .db_models import MessageAudit
 from .facts import FactStore
 from .federation import FederationStore
 from .inspector import Inspector
-from .routing import SemanticPubSub, SemanticRouter
-from .compiler import compile_content
 from .patterns import PatternStore
 from .references import ReferenceStore
+from .routing import SemanticPubSub, SemanticRouter
 from .schemas import Budget, EncodeRequest, Provenance
 
 
