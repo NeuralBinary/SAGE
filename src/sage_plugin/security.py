@@ -21,8 +21,8 @@ class AuthPrincipal:
         return self.kind in {"service", "development"}
 
 
-_principal: ContextVar[AuthPrincipal] = ContextVar(
-    "sage_auth_principal", default=AuthPrincipal("development")
+_principal: ContextVar[AuthPrincipal | None] = ContextVar(
+    "sage_auth_principal", default=None
 )
 
 _AGENT_ALLOWED_PREFIXES = (
@@ -110,7 +110,10 @@ async def require_api_key(
 
 
 def current_principal() -> AuthPrincipal:
-    return _principal.get()
+    principal = _principal.get()
+    if principal is None:
+        return AuthPrincipal("development")
+    return principal
 
 
 def enforce_agent_scope(*, actor: str | None, workspace: str) -> str | None:

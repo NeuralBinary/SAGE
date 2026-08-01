@@ -7,9 +7,9 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from .checkpoints import CheckpointStore
 from .config import Settings
 from .db_models import SharedState
-from .checkpoints import CheckpointStore
 
 
 def _hash(value: Any, workspace: str = "default") -> str:

@@ -4,15 +4,16 @@ import argparse
 import json
 import math
 import statistics
+import threading
 import time
 import uuid
-import threading
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Iterator
+from typing import Any
 
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -23,8 +24,8 @@ from .codec import SageCodec
 from .config import Settings
 from .db import Base
 from .db_models import BusMessage, LearnedPattern, PatternCandidate, PatternSourceEvidence
-from .schemas import EncodeRequest
 from .patterns import PatternStore, pattern_signature
+from .schemas import EncodeRequest
 
 
 @dataclass

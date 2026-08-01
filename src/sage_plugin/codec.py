@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import math
 import uuid
-from datetime import datetime, timezone
 from typing import Any, cast
 
 from sqlalchemy.orm import Session
@@ -14,13 +13,20 @@ from .compiler import compile_content
 from .config import Settings
 from .db_models import Concept, MessageAudit
 from .knowledge import KnowledgeStore
+from .patterns import PatternStore
 from .references import ReferenceAccessError, ReferenceExpiredError, ReferenceStore, canonical_bytes
 from .reliability import ModelIdentityStore
-from .protocol_spec import canonical_json_bytes, canonical_msgpack_bytes
-from .patterns import PatternStore
+from .schemas import (
+    Atom,
+    DecodeResponse,
+    EncodeRequest,
+    EncodeResponse,
+    FallbackMode,
+    Packet,
+    Provenance,
+)
 from .semantic_safety import assess_unit
 from .signing import sign_wire
-from .schemas import Atom, DecodeResponse, EncodeRequest, EncodeResponse, FallbackMode, Packet, Provenance
 from .state import StateStore, apply_patch, diff
 from .telemetry import Telemetry
 from .wire_codec import WireCodec

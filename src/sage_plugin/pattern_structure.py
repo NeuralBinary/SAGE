@@ -3,9 +3,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from .compiler import SemanticUnit, normalize
+
 
 def _path_shape(path: str) -> str:
     return re.sub(r"\[\d+\]", "[]", path)

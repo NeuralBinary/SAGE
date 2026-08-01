@@ -6,6 +6,7 @@ import json
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from datetime import UTC
 from typing import Any
 
 from fastapi import FastAPI, Request, Response
@@ -16,9 +17,9 @@ from . import __version__
 from .api import router
 from .config import get_settings
 from .db import SessionLocal, init_db
-from .security import bearer_token
 from .db_models import IdempotencyRecord
 from .resilience import BackpressureError, QuotaExceededError, request_hash
+from .security import bearer_token
 
 REQUESTS = Counter("sage_http_requests_total", "SAGE HTTP requests", ["method", "path", "status"])
 LATENCY = Histogram("sage_http_request_seconds", "SAGE HTTP latency", ["method", "path"])
@@ -102,8 +103,8 @@ class IdempotencyMiddleware:
         record_scope = f"{workspace}:{auth_scope}"[:128]
         operation = f"{scope.get('method')}:{path}"[:128]
         digest = request_hash(payload)
-        from datetime import datetime, timedelta, timezone
-        expires = datetime.now(timezone.utc) + timedelta(seconds=settings.idempotency_ttl_seconds)
+        from datetime import datetime, timedelta
+        expires = datetime.now(UTC) + timedelta(seconds=settings.idempotency_ttl_seconds)
         reserved = False
         with SessionLocal() as db:
             existing = db.query(IdempotencyRecord).filter_by(workspace=record_scope, operation=operation, key=key).one_or_none()

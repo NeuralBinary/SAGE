@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import random
 
-from sage_plugin.protocol_spec import canonical_digest, canonical_json_bytes, canonical_msgpack_bytes, validate_wire_v2
+from sage_plugin.protocol_spec import (
+    canonical_digest,
+    canonical_json_bytes,
+    canonical_msgpack_bytes,
+    validate_wire_v2,
+)
 from sage_plugin.state import apply_patch, diff
 
 

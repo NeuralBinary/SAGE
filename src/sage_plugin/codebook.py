@@ -10,7 +10,12 @@ from sqlalchemy.orm import Session
 from .compiler import normalize
 from .config import Settings
 from .db_models import Candidate, Concept, ConceptAlias
-from .embeddings import EmbeddingProvider, HashEmbeddingProvider, OpenAICompatibleEmbeddingProvider, cosine
+from .embeddings import (
+    EmbeddingProvider,
+    HashEmbeddingProvider,
+    OpenAICompatibleEmbeddingProvider,
+    cosine,
+)
 
 
 def lsh_bucket(vector: list[float], bits: int) -> str:

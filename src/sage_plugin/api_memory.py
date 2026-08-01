@@ -1,19 +1,34 @@
 from __future__ import annotations
 
 from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from .api_helpers import concept_response
 from .codebook import Codebook
 from .config import get_settings
 from .db import get_db
 from .db_models import Concept
-from .resilience import QuotaExceededError
 from .references import ReferenceAccessError, ReferenceExpiredError, ReferenceStore
-from .schemas import ConceptAliasRequest, ConceptDeprecateRequest, ConceptRegisterRequest, ConceptResponse, RefPolicyRequest, RefGrantRequest, ResolveRequest, StateCreateRequest, StatePatchRequest, StateResponse, StoreRequest, StoreResponse
+from .resilience import QuotaExceededError
+from .schemas import (
+    ConceptAliasRequest,
+    ConceptDeprecateRequest,
+    ConceptRegisterRequest,
+    ConceptResponse,
+    RefGrantRequest,
+    RefPolicyRequest,
+    ResolveRequest,
+    StateCreateRequest,
+    StatePatchRequest,
+    StateResponse,
+    StoreRequest,
+    StoreResponse,
+)
 from .security import current_principal, enforce_agent_scope
 from .state import StateStore
-from .api_helpers import concept_response
 
 router = APIRouter()
 

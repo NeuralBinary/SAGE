@@ -1,25 +1,65 @@
 from __future__ import annotations
 
 from typing import Any
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from .a2a_adapter import agent_card, agent_card_extension, pack_data_part, pack_message, unpack_data_part, unpack_message
+
+from .a2a_adapter import (
+    agent_card,
+    agent_card_extension,
+    pack_data_part,
+    pack_message,
+    unpack_data_part,
+    unpack_message,
+)
+from .api_helpers import _apply_trace_headers, bus_response
 from .bus import SemanticBus
-from .conformance import run_tck
 from .codec import SageCodec
 from .config import get_settings
+from .conformance import run_tck
 from .db import get_db
 from .db_models import MessageAudit
 from .inspector import Inspector
-from .resilience import BackpressureError, QuotaExceededError
 from .integrations import config_for, profiles
 from .patterns import PatternStore
-from .protocol_spec import SAGE_PROTOCOL, SAGE_SUPPORTED_PROTOCOLS, SAGE_WIRE_VERSION, canonical_digest, validate_wire_v2, wire_schema
-from .schemas import A2APackRequest, A2AUnpackRequest, A2AMessagePackRequest, A2AMessageUnpackRequest, BusAckRequest, BusBatchAckRequest, BusContextItem, BusMessageResponse, DecodeRequest, DecodeResponse, EncodeRequest, EncodeResponse, ExplainResponse, FeedbackRequest, InspectorResponse, HandoffRequest, IntegrationConfigResponse, IntegrationProfile, ReceiveRequest, ReplayResponse, SendRequest, TransportReceiveRequest, TransportResponse
+from .protocol_spec import (
+    SAGE_PROTOCOL,
+    SAGE_SUPPORTED_PROTOCOLS,
+    SAGE_WIRE_VERSION,
+    canonical_digest,
+    validate_wire_v2,
+    wire_schema,
+)
+from .resilience import BackpressureError, QuotaExceededError
+from .schemas import (
+    A2AMessagePackRequest,
+    A2AMessageUnpackRequest,
+    A2APackRequest,
+    A2AUnpackRequest,
+    BusAckRequest,
+    BusBatchAckRequest,
+    BusContextItem,
+    BusMessageResponse,
+    DecodeRequest,
+    DecodeResponse,
+    EncodeRequest,
+    EncodeResponse,
+    ExplainResponse,
+    FeedbackRequest,
+    HandoffRequest,
+    InspectorResponse,
+    IntegrationConfigResponse,
+    IntegrationProfile,
+    ReceiveRequest,
+    ReplayResponse,
+    SendRequest,
+    TransportReceiveRequest,
+    TransportResponse,
+)
 from .security import current_principal, enforce_agent_scope
-from .api_helpers import _apply_trace_headers, bus_response
 
 router = APIRouter()
 

@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from .codec import SageCodec
-from .references import ReferenceAccessError, ReferenceExpiredError
 from .config import Settings
 from .db_models import BusMessage, MessageAudit, OrderingCounter
 from .resilience import QuotaManager
@@ -17,7 +16,7 @@ from .schemas import Budget, EncodeRequest, Packet, Provenance
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class SemanticBus:
@@ -275,7 +274,7 @@ class SemanticBus:
         if item.expires_at is not None:
             expires = item.expires_at
             if expires.tzinfo is None:
-                expires = expires.replace(tzinfo=timezone.utc)
+                expires = expires.replace(tzinfo=UTC)
             if expires <= _utcnow():
                 raise ValueError("cannot acknowledge an expired message")
         item.status = "acked"

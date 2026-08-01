@@ -5,7 +5,6 @@ import json
 from typing import Any
 
 import msgpack
-
 from sqlalchemy.orm import Session
 
 from .codec import SageCodec

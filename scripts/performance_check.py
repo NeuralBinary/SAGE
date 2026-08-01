@@ -61,7 +61,6 @@ def main() -> None:
     from sage_plugin.codec import SageCodec
     from sage_plugin.config import get_settings
     from sage_plugin.db import Base, SessionLocal, engine
-    import sage_plugin.db_models
     from sage_plugin.main import app
     from sage_plugin.schemas import EncodeRequest
 

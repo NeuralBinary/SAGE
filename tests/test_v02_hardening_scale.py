@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from datetime import UTC
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -24,8 +25,11 @@ def _private_key() -> tuple[str, str]:
     key = Ed25519PrivateKey.generate()
     private = key.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption())
     public = key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
-    enc = lambda raw: base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
-    return enc(private), enc(public)
+
+    def _b64(raw: bytes) -> str:
+        return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+    return _b64(private), _b64(public)
 
 
 def test_ordering_idempotency_and_backpressure_are_deterministic():
@@ -304,7 +308,8 @@ def test_holdout_activation_requires_distinct_validation_traffic():
 
 
 def test_reliability_drift_cools_active_pattern():
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
+
     from sage_plugin.db_models import LearnedPattern, ReliabilityWindow
     from sage_plugin.reliability import ReliabilityMonitor
 
@@ -322,8 +327,8 @@ def test_reliability_drift_cools_active_pattern():
         )
         db.add(pattern)
         db.flush()
-        now = datetime.now(timezone.utc)
-        current_start = datetime.fromtimestamp(int(now.timestamp()) - (int(now.timestamp()) % 3600), tz=timezone.utc)
+        now = datetime.now(UTC)
+        current_start = datetime.fromtimestamp(int(now.timestamp()) - (int(now.timestamp()) % 3600), tz=UTC)
         db.add(ReliabilityWindow(
             workspace="w", receiver="r", model_identity_hash="model-build", pattern_id=pattern.id,
             task_family="task", window_start=current_start - timedelta(hours=1), sample_count=10, fidelity_sum=9.9,
@@ -337,7 +342,7 @@ def test_reliability_drift_cools_active_pattern():
 
 
 def test_reachability_gc_removes_only_old_unreachable_state():
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from sage_plugin.maintenance import cleanup
     from sage_plugin.state import StateStore
@@ -354,7 +359,7 @@ def test_reachability_gc_removes_only_old_unreachable_state():
         retained = states.create({"status": "retained"}, workspace="w")
         removed = states.create({"status": "removed"}, workspace="w")
         states.checkpoints.create(retained)
-        old = datetime.now(timezone.utc) - timedelta(days=5)
+        old = datetime.now(UTC) - timedelta(days=5)
         retained.created_at = old
         removed.created_at = old
         db.commit()

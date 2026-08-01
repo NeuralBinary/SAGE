@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from typing import Any
+
 from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
+
 from .db_models import Concept
 from .schemas import BusMessageResponse, ConceptResponse, EncodeRequest, TraceContext
+
 
 def _apply_trace_headers(req: EncodeRequest, traceparent: str | None, tracestate: str | None) -> None:
     if req.trace is not None or traceparent is None:

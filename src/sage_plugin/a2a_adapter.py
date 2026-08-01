@@ -3,7 +3,13 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from .protocol_spec import SAGE_MEDIA_TYPE_JSON, SAGE_PROTOCOL, SAGE_SUPPORTED_PROTOCOLS, SAGE_WIRE_VERSION, validate_wire_v2
+from .protocol_spec import (
+    SAGE_MEDIA_TYPE_JSON,
+    SAGE_PROTOCOL,
+    SAGE_SUPPORTED_PROTOCOLS,
+    SAGE_WIRE_VERSION,
+    validate_wire_v2,
+)
 
 SAGE_EXTENSION_URI = "urn:uuid:f81af17b-cc6a-5cdf-8a0f-51116b2e6a8d"
 SAGE_MEDIA_TYPE = SAGE_MEDIA_TYPE_JSON

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import base64
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from cryptography.hazmat.primitives import serialization
@@ -11,14 +11,13 @@ from sqlalchemy import func, select
 from sage_plugin.bus import SemanticBus
 from sage_plugin.codec import SageCodec
 from sage_plugin.compiler import compile_content
-from sage_plugin.patterns import PatternStore, composition_for
 from sage_plugin.config import Settings
 from sage_plugin.db import SessionLocal
 from sage_plugin.db_models import (
     Contradiction,
-    MessageAudit,
     FactDependency,
     LearnedPattern,
+    MessageAudit,
     PatternEdge,
     Reference,
     ReferenceGrant,
@@ -26,6 +25,7 @@ from sage_plugin.db_models import (
 from sage_plugin.facts import FactStore
 from sage_plugin.federation import FederationStore
 from sage_plugin.inspector import Inspector
+from sage_plugin.patterns import PatternStore, composition_for
 from sage_plugin.references import ReferenceAccessError, ReferenceStore
 from sage_plugin.routing import SemanticPubSub, SemanticRouter
 from sage_plugin.schemas import EncodeRequest
@@ -218,7 +218,7 @@ def test_counterfactual_receiver_fidelity_controls_pattern_use_and_gc():
         )
         codec = SageCodec(db, settings)
         content = {"deployment": "blocked", "failure": "tests"}
-        first = codec.encode(EncodeRequest(content=content, use_cache=False))
+        codec.encode(EncodeRequest(content=content, use_cache=False))
         pattern = db.scalar(select(LearnedPattern))
         assert pattern is not None and pattern.status == "shadow"
 
@@ -249,7 +249,7 @@ def test_counterfactual_receiver_fidelity_controls_pattern_use_and_gc():
         assert codec.patterns.receiver_fidelity(pattern, "bad", "model-bad") == pytest.approx(0.2)
         assert codec.patterns.utility_score(pattern) >= 0.0
 
-        old = datetime.now(timezone.utc) - timedelta(days=3)
+        old = datetime.now(UTC) - timedelta(days=3)
         pattern.last_used_at = old
         gc = codec.patterns.garbage_collect()
         assert gc["patterns_cooling"] == 1
