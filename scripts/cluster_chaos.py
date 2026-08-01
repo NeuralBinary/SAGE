@@ -36,21 +36,35 @@ def verify_round_trip(base: str, key: str, workspace: str, suffix: str, ca_cert:
         "idempotency_key": f"chaos-{suffix}",
         "ordering_key": "chaos-stream",
     }
-    status, sent = api(base, key, "POST", "/v1/bus/handoff", handoff, ca_cert)
-    if status != 200:
-        raise RuntimeError(f"handoff failed: {sent}")
-    status, repeated = api(base, key, "POST", "/v1/bus/handoff", handoff, ca_cert)
-    if status != 200 or repeated.get("message_id") != sent.get("message_id"):
-        raise RuntimeError("idempotent handoff failed")
-    query = parse.urlencode({"workspace": workspace, "claim": "true", "limit": 1})
-    status, rows = api(base, key, "GET", f"/v1/bus/pull/{parse.quote(receiver)}?{query}", ca_cert=ca_cert)
-    if status != 200 or not isinstance(rows, list) or len(rows) != 1:
-        raise RuntimeError("claim failed")
-    message_id = rows[0]["message_id"]
-    status, ack = api(base, key, "POST", f"/v1/bus/{parse.quote(message_id)}/ack", {"message_id": message_id, "receiver": receiver, "workspace": workspace}, ca_cert)
-    if status != 200 or ack.get("status") != "acked":
-        raise RuntimeError("ack failed")
-    return message_id
+
+    def attempt() -> tuple[int, str]:
+        status, sent = api(base, key, "POST", "/v1/bus/handoff", handoff, ca_cert)
+        if status != 200:
+            return status, f"handoff failed: {sent}"
+        status, repeated = api(base, key, "POST", "/v1/bus/handoff", handoff, ca_cert)
+        if status != 200 or repeated.get("message_id") != sent.get("message_id"):
+            return 599, "idempotent handoff failed"
+        query = parse.urlencode({"workspace": workspace, "claim": "true", "limit": 1})
+        status, rows = api(base, key, "GET", f"/v1/bus/pull/{parse.quote(receiver)}?{query}", ca_cert=ca_cert)
+        if status != 200 or not isinstance(rows, list) or len(rows) != 1:
+            return 599, "claim failed"
+        message_id = rows[0]["message_id"]
+        status, ack = api(base, key, "POST", f"/v1/bus/{parse.quote(message_id)}/ack", {"message_id": message_id, "receiver": receiver, "workspace": workspace}, ca_cert)
+        if status != 200 or ack.get("status") != "acked":
+            return 599, "ack failed"
+        return 200, message_id
+
+    # A paused/killed worker can leave one in-flight request hanging on the
+    # load balancer while it fails over (nginx 499/502/504). Retry transient
+    # transport failures so the assertion is cluster recovery, not scheduling.
+    last: tuple[int, str] = (0, "no attempt")
+    for _ in range(5):
+        status, detail = attempt()
+        if status == 200:
+            return detail
+        last = (status, detail)
+        time.sleep(2)
+    raise RuntimeError(f"round trip failed after retries: {last}")
 
 
 def main() -> None:
