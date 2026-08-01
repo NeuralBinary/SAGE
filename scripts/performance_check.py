@@ -49,23 +49,15 @@ def stats(values: list[float]) -> dict[str, float]:
     }
 
 
-def measure_round(args: argparse.Namespace) -> dict[str, Any]:
-    db_path = Path(tempfile.gettempdir()) / f"sage-performance-{os.getpid()}.db"
-    db_path.unlink(missing_ok=True)
-    os.environ["SAGE_DATABASE_URL"] = f"sqlite:///{db_path}"
-    os.environ["SAGE_AUTH_REQUIRED"] = "false"
-    os.environ["SAGE_PATTERN_LEARNING_ENABLED"] = "false"
-    os.environ["SAGE_SEMANTIC_CACHE_ENABLED"] = "false"
-
+def measure_round(args: argparse.Namespace, db_path: Path) -> dict[str, Any]:
     from fastapi.testclient import TestClient
 
     from sage_plugin.codec import SageCodec
     from sage_plugin.config import get_settings
-    from sage_plugin.db import Base, SessionLocal, engine
+    from sage_plugin.db import SessionLocal
     from sage_plugin.main import app
     from sage_plugin.schemas import EncodeRequest
 
-    Base.metadata.create_all(engine)
     settings = get_settings()
     content = {
         "project": "sage",
@@ -159,8 +151,18 @@ def main() -> None:
 
     best: dict[str, Any] | None = None
     chosen = 1
+    db_path = Path(tempfile.gettempdir()) / f"sage-performance-{os.getpid()}.db"
+    db_path.unlink(missing_ok=True)
+    os.environ["SAGE_DATABASE_URL"] = f"sqlite:///{db_path}"
+    os.environ["SAGE_AUTH_REQUIRED"] = "false"
+    os.environ["SAGE_PATTERN_LEARNING_ENABLED"] = "false"
+    os.environ["SAGE_SEMANTIC_CACHE_ENABLED"] = "false"
+
+    from sage_plugin.db import Base, engine
+
+    Base.metadata.create_all(engine)
     for round_index in range(1, args.best_of + 1):
-        report = measure_round(args)
+        report = measure_round(args, db_path)
         report["round"] = round_index
         if report["ok"]:
             chosen = round_index
@@ -174,11 +176,8 @@ def main() -> None:
     best["best_of"] = args.best_of
     print(json.dumps(best, separators=(",", ":")))
 
-    from sage_plugin.db import Base, engine
-
     Base.metadata.drop_all(engine)
     engine.dispose()
-    db_path = Path(tempfile.gettempdir()) / f"sage-performance-{os.getpid()}.db"
     db_path.unlink(missing_ok=True)
     if not best["ok"]:
         raise SystemExit(f"latency limits exceeded (best round {chosen} of {args.best_of})")
