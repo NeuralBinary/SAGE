@@ -9,46 +9,42 @@
 | Repository | https://github.com/NeuralBinary/SAGE |
 | Credits | @NeuralBinary, @ro0ti |
 | Public version | v0.2 |
-| Package version | 0.2.2 |
+| Package version | 0.2.3 |
 | Protocol | sage/0.2 |
 | Wire | 2 |
 | Database baseline | 0001_sage_0_2 |
 
 This report records qualification of the clean v0.2 first-deployment baseline on July 31, 2026. No pre-v0.2 protocol reader, compatibility layer, or migration chain is shipped.
 
-## v0.2.2 patch verification
+## v0.2.3 patch verification
 
-v0.2.2 is a patch release over the v0.2.1 baseline. Protocol `sage/0.2`, wire
+v0.2.3 is a patch release over the v0.2.2 baseline. Protocol `sage/0.2`, wire
 version `2`, the `0001_sage_0_2` migration baseline, and the 13 normative TCK
 vectors are unchanged.
 
-Verified for v0.2.2 in the release worktree (branch `sage/release-0.2.2`):
+Verified for v0.2.3:
 
-- The packaged wheel `sage_agent_protocol-0.2.2-py3-none-any.whl` installs
-  into a fresh virtual environment and imports as 0.2.2.
-- Issue #1 regression fix: with the service started from a working directory
-  outside the repository, the default database URL resolves to the user home
-  directory (`sqlite:///$HOME/sage.db`) and never to a working-directory
-  relative `./sage.db`. An explicit `SAGE_DATABASE_URL` is preserved exactly.
-- The full automated suite passes against the installed wheel: 111 tests.
-- The Python TCK passes 13/13 vectors from the installed wheel.
+- Full CI matrix green on the merged main (`ci` workflow, commit
+  `d2f6ddad`): Python 3.11/3.12/3.13/3.14 (ruff, TCK, conformance matrix
+  incl. JavaScript and Go, differential fuzzing, chaos suite, compileall,
+  pytest, latency gate, qualification), PostgreSQL qualification,
+  OpenClaw adapter (type-check, build, TCK, package check), package job
+  (release_check, build_release, package_check, Docker quick start),
+  dependency audit, and the staging TLS cluster (soak, TLS delivery,
+  worker/database recovery, stop logs).
 - `scripts/release_check.py` passes every version-consistency, protocol,
-  migration, schema, spec/protobuf, and TCK-drift check for v0.2.2; its only
-  failure is the artifact-presence gate for the OpenClaw `dist/` outputs,
-  which cannot be built in this worktree (see pending items).
-
-Pending, completed by the release workflow after merge:
-
-- OpenClaw npm type-check, build, and TCK: Issue #3 restores the adapter build
-  surface and the missing conformance source; this worktree predates that
-  merge, so `integrations/openclaw/dist/index.js` and
-  `integrations/openclaw/dist/conformance.js` cannot be produced here.
-- JavaScript and Go conformance, differential fuzzing, the staging/Docker
-  quick-start gate, `scripts/package_check.py` against the built v0.2.2
-  assets, and the computed SHA-256 checksums.
+  migration, schema, spec/protobuf, TCK-drift, and artifact gate for
+  v0.2.3 (`{"ok":true,"version":"0.2.3",...}`).
+- Full automated suite: 113 tests pass (pytest phase runs without the `mcp`
+  extra; see Issue #11 for the mcp single-run session-manager limitation).
+- `scripts/build_release.py` produces all six v0.2.3 assets, and
+  `scripts/package_check.py` verifies the source archive, wheel, Hermes
+  plugin, and OpenClaw package for v0.2.3.
+- The packaged wheel `sage_agent_protocol-0.2.3-py3-none-any.whl` installs
+  into a fresh virtual environment and imports as 0.2.3.
 
 The sections below record the v0.2.1 baseline qualification and remain the
-reference for surfaces unchanged by v0.2.2.
+reference for surfaces unchanged by v0.2.3.
 
 ## v0.2 hardening scope
 
@@ -245,7 +241,7 @@ The PostgreSQL CI job uses PostgreSQL 18 with configured-database mode and runs 
 
 ## API and protocol artifacts
 
-The FastAPI OpenAPI document builds as OpenAPI 3.1.0 with 81 paths, title `SAGE`, and version 0.2.2.
+The FastAPI OpenAPI document builds as OpenAPI 3.1.0 with 81 paths, title `SAGE`, and version 0.2.3.
 
 Normative JSON Schemas, protobuf binding, Markdown protocol specification, generated TypeScript/Go wire metadata, and TCK artifacts are generated or checked from the frozen v0.2 protocol model. The installed Python package mirrors the repository hierarchy under `sage_plugin/spec/schemas/`.
 
@@ -286,11 +282,11 @@ deployment conventions.
 
 ## Distribution qualification
 
-The Python wheel builds as `sage_agent_protocol-0.2.2-py3-none-any.whl`. `scripts/package_check.py` verifies package metadata, author, Hermes entry point, protocol specification, protobuf binding, nested JSON Schemas, TCK implementation matrix, and TCK vectors directly from the wheel archive. The source tree also ships a standalone Hermes plugin directory and installer; release consistency requires the standalone adapter to remain byte-identical to the packaged Hermes adapter.
+The Python wheel builds as `sage_agent_protocol-0.2.3-py3-none-any.whl`. `scripts/package_check.py` verifies package metadata, author, Hermes entry point, protocol specification, protobuf binding, nested JSON Schemas, TCK implementation matrix, and TCK vectors directly from the wheel archive. The source tree also ships a standalone Hermes plugin directory and installer; release consistency requires the standalone adapter to remain byte-identical to the packaged Hermes adapter.
 
-The wheel installs into an isolated target, imports as 0.2.2 with author NeuralBinary, exposes `sage = sage_plugin.hermes_plugin`, contains all 11 normative JSON Schemas under `sage_plugin/spec/schemas/`, and passes 13/13 TCK vectors plus 250/250 malformed-wire checks from the installed package.
+The wheel installs into an isolated target, imports as 0.2.3 with author NeuralBinary, exposes `sage = sage_plugin.hermes_plugin`, contains all 11 normative JSON Schemas under `sage_plugin/spec/schemas/`, and passes 13/13 TCK vectors plus 250/250 malformed-wire checks from the installed package.
 
-The OpenClaw archive builds as `@sage-agent/openclaw-sage@0.2.2`. `scripts/package_check.py` verifies its metadata, author, credits, plugin manifest, runtime, conformance runner, and TCK content. The packed JavaScript runtime and conformance runner pass syntax checking, its independent TCK passes 13/13 vectors, and the adapter harness verifies object content, defensive JSON-object recovery, plain-text rejection, and semantic-envelope rejection.
+The OpenClaw archive builds as `@sage-agent/openclaw-sage@0.2.3`. `scripts/package_check.py` verifies its metadata, author, credits, plugin manifest, runtime, conformance runner, and TCK content. The packed JavaScript runtime and conformance runner pass syntax checking, its independent TCK passes 13/13 vectors, and the adapter harness verifies object content, defensive JSON-object recovery, plain-text rejection, and semantic-envelope rejection.
 
 ## Reproducibility and release policy
 
