@@ -30,19 +30,63 @@ Design constraints
   token estimation is deterministic in both modes.
 * Thread-safe for the codec's usage pattern: one recorder instance is used
   per encode/decode call and is never shared across calls, so there is no
-  cross-call shared mutable state. The no-op singleton and the module-level
-  token-estimator cache are the only module state and are safe to share.
+  cross-call shared mutable state. Completed per-exchange reports are
+  published into a bounded, lock-guarded history (``ContextReportHistory``),
+  so overlapping calls cannot clobber or corrupt a completed report. The
+  no-op singleton and the module-level token-estimator cache are the only
+  other module state and are safe to share.
 * Additive: this module must never change wire output. It imports nothing
-  from the rest of ``sage_plugin`` and raises nothing.
+  from the rest of ``sage_plugin``. Recorders never raise on any input
+  value; the only way a recorder can raise is a caller-supplied
+  ``estimate`` callable that itself raises (the default estimator never
+  raises).
 """
 
 from __future__ import annotations
 
 import math
 import threading
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any
+
+# ---------------------------------------------------------------------------
+# Guarded coercion
+# ---------------------------------------------------------------------------
+
+
+def _coerce_int(value: Any, *, fallback: int = 0) -> int:
+    """Deterministic, never-raising coercion of ``value`` to an ``int``.
+
+    Anything ``int()`` understands (numbers, numeric strings, booleans) is
+    used as-is; every other input -- including ``None`` and unparseable
+    strings such as a SQLite ``byte_size`` row whose Integer column is not
+    enforced -- maps to ``fallback`` (0). The same input always maps to the
+    same output, so recorded values stay deterministic. Never raises.
+    """
+    if isinstance(value, bool):
+        return int(value)
+    try:
+        return int(value)
+    except Exception:
+        return fallback
+
+
+def _coerce_text(value: Any, *, fallback: str = "") -> str:
+    """Deterministic, never-raising coercion of ``value`` to ``str``.
+
+    Strings pass through untouched; everything else is converted with
+    ``str()`` when that succeeds, and anything whose conversion raises
+    (e.g. an object whose ``__str__`` raises) maps to ``fallback`` ("").
+    Never raises.
+    """
+    if isinstance(value, str):
+        return value
+    try:
+        return str(value)
+    except Exception:
+        return fallback
 
 # ---------------------------------------------------------------------------
 # Token estimation
@@ -167,6 +211,41 @@ class ContextReport:
         return self
 
 
+class ContextReportHistory:
+    """Bounded, thread-safe history of completed per-exchange reports.
+
+    Completed report snapshots are appended under a lock and readers always
+    receive copies, so a concurrent publish can never surface a partial,
+    clobbered, or corrupted report. The history is bounded: once ``maxlen``
+    entries are held, the oldest are dropped. While accounting is disabled
+    nothing is ever published, so ``most_recent()`` is ``None`` and
+    ``recent()`` is empty.
+    """
+
+    def __init__(self, maxlen: int = 64) -> None:
+        self._maxlen = max(1, maxlen)
+        self._reports: deque[ContextReport] = deque(maxlen=self._maxlen)
+        self._lock = threading.Lock()
+
+    def publish(self, report: ContextReport) -> None:
+        """Append a completed exchange's report, stored as a snapshot copy."""
+        with self._lock:
+            self._reports.append(replace(report))
+
+    def most_recent(self) -> ContextReport | None:
+        """The most recently completed report, or None when none exists."""
+        with self._lock:
+            if not self._reports:
+                return None
+            return replace(self._reports[-1])
+
+    def recent(self, limit: int = 10) -> list[ContextReport]:
+        """The last ``limit`` completed reports, most recent first (copies)."""
+        with self._lock:
+            n = min(max(_coerce_int(limit, fallback=10), 0), len(self._reports))
+            return [replace(r) for r in list(self._reports)[len(self._reports) - n :]][::-1]
+
+
 # ---------------------------------------------------------------------------
 # Recorder
 # ---------------------------------------------------------------------------
@@ -176,7 +255,10 @@ class ContextAccounting:
     """Per-exchange recorder fed by the codec's encode/decode paths.
 
     One instance is used per encode/decode call; it is therefore not shared
-    across threads. All record methods are additive and never raise.
+    across threads. All record methods are additive and never raise on any
+    input value; the only way a recorder can raise is a caller-supplied
+    ``estimate`` callable that itself raises (the default estimator never
+    raises).
     """
 
     def __init__(self, estimate: Callable[[str], int] = estimate_tokens, *, enabled: bool = True) -> None:
@@ -198,29 +280,30 @@ class ContextAccounting:
     def record_wire_bytes(self, json_bytes: int, msgpack_bytes: int) -> None:
         if not self.enabled:
             return
-        self._report.wire_bytes_json += int(json_bytes)
-        self._report.wire_bytes_msgpack += int(msgpack_bytes)
+        self._report.wire_bytes_json += _coerce_int(json_bytes)
+        self._report.wire_bytes_msgpack += _coerce_int(msgpack_bytes)
 
     def record_stored_bytes(self, byte_count: int) -> None:
         if not self.enabled:
             return
-        self._report.stored_bytes += max(int(byte_count), 0)
+        self._report.stored_bytes += max(_coerce_int(byte_count), 0)
 
     def record_model_tokens(self, token_count: int) -> None:
         if not self.enabled:
             return
-        self._report.model_tokens += max(int(token_count), 0)
+        self._report.model_tokens += max(_coerce_int(token_count), 0)
 
     def record_codebook_fingerprint(self, fingerprint: str) -> None:
         if not self.enabled:
             return
-        self._report.codebook_setup_bytes += len(fingerprint.encode("utf-8"))
-        self._report.codebook_setup_tokens += self._estimate(fingerprint)
+        text = _coerce_text(fingerprint)
+        self._report.codebook_setup_bytes += len(text.encode("utf-8"))
+        self._report.codebook_setup_tokens += self._estimate(text)
 
     def record_codebook_definition(self, code: str, canonical: str) -> None:
         if not self.enabled:
             return
-        text = f"{code} {canonical}".strip()
+        text = f"{_coerce_text(code)} {_coerce_text(canonical)}".strip()
         self._report.codebook_setup_bytes += len(text.encode("utf-8"))
         self._report.codebook_setup_tokens += self._estimate(text)
         self._report.codebook_definitions += 1
@@ -228,14 +311,15 @@ class ContextAccounting:
     def record_pattern_definition(self, canonical: str) -> None:
         if not self.enabled:
             return
-        self._report.pattern_setup_bytes += len(canonical.encode("utf-8"))
-        self._report.pattern_setup_tokens += self._estimate(canonical)
+        text = _coerce_text(canonical)
+        self._report.pattern_setup_bytes += len(text.encode("utf-8"))
+        self._report.pattern_setup_tokens += self._estimate(text)
         self._report.pattern_definitions += 1
 
     def record_decoding_text(self, canonical: str, literal: Any = None) -> None:
         if not self.enabled:
             return
-        parts = [p for p in (canonical, str(literal) if literal is not None else "") if p]
+        parts = [p for p in (_coerce_text(canonical), _coerce_text(literal) if literal is not None else "") if p]
         text = " ".join(parts)
         self._report.decoding_bytes += len(text.encode("utf-8"))
         self._report.decoding_tokens += self._estimate(text)
@@ -245,11 +329,12 @@ class ContextAccounting:
             return
         self._report.reference_fetch_count += 1
         if byte_size is not None:
-            self._report.reference_fetch_bytes += max(int(byte_size), 0)
+            self._report.reference_fetch_bytes += max(_coerce_int(byte_size), 0)
 
     def record_fallback(self, text: str) -> None:
         if not self.enabled:
             return
+        text = _coerce_text(text)
         self._report.fallback_bytes += len(text.encode("utf-8"))
         self._report.fallback_tokens += self._estimate(text)
         self._report.fallback_count += 1

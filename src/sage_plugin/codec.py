@@ -46,6 +46,7 @@ class SageCodec:
         self.telemetry = Telemetry(settings)
         self.wire_codec = WireCodec(settings)
         self.accounting = context_accounting.collector(False)
+        self._report_history = context_accounting.ContextReportHistory()
 
     def _budget_bytes(self, request: EncodeRequest) -> tuple[int, int | None]:
         token_budget = request.budget.max_tokens if request.budget and request.budget.max_tokens else self.settings.default_token_budget
@@ -69,13 +70,32 @@ class SageCodec:
         return "P" + uuid.uuid4().hex
 
     def _begin_accounting(self) -> context_accounting.ContextAccounting:
-        """Start a fresh per-exchange recorder (shared no-op when disabled)."""
-        self.accounting = context_accounting.collector(self.settings.context_accounting_enabled)
-        return self.accounting
+        """Start a fresh per-exchange recorder (shared no-op when disabled).
+
+        The recorder is call-local: it is deliberately NOT stored on the
+        instance, so overlapping encode/decode calls on a shared codec
+        cannot clobber each other's accounting. Completed reports are
+        published thread-safely via ``_publish_report``.
+        """
+        return context_accounting.collector(self.settings.context_accounting_enabled)
+
+    def _publish_report(self, report: context_accounting.ContextReport) -> None:
+        """Thread-safely publish a completed exchange's report snapshot."""
+        self._report_history.publish(report)
 
     def context_report(self) -> context_accounting.ContextReport | None:
-        """Snapshot of the most recent exchange's accounting, or None when disabled."""
-        return self.accounting.snapshot() if self.accounting.enabled else None
+        """Snapshot of the most recently COMPLETED exchange, or None when
+        accounting is disabled or no exchange has completed yet."""
+        return self._report_history.most_recent()
+
+    def context_reports(self, limit: int = 10) -> list[context_accounting.ContextReport]:
+        """The last ``limit`` completed per-exchange reports, most recent first.
+
+        Empty when accounting is disabled. Each entry is an immutable
+        snapshot, so overlapping encode/decode calls cannot clobber or
+        corrupt a completed report.
+        """
+        return self._report_history.recent(limit)
 
     def compact(self, packet: Packet) -> dict[str, Any]:
         return self.wire_codec.compact(packet)
@@ -545,6 +565,8 @@ class SageCodec:
                 self.telemetry.add("pattern.count", pattern_count, strategy=strategy)
             if ref_bytes_avoided:
                 self.telemetry.add("ref.bytes_avoided", ref_bytes_avoided, strategy=strategy)
+        if accounting.enabled:
+            self._publish_report(accounting.snapshot())
         return EncodeResponse(
             packet=packet,
             wire_json=json_wire,
@@ -636,6 +658,8 @@ class SageCodec:
         if acknowledge and actor:
             self.knowledge.acknowledge(actor, packet, workspace)
             self.db.commit()
+        if accounting.enabled:
+            self._publish_report(accounting.snapshot())
         return DecodeResponse(
             act=packet.act,
             concepts=concepts,
