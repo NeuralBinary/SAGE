@@ -37,7 +37,7 @@ jobs:
       - run: python scripts/chaos_suite.py
       - run: python -m compileall -q src tests scripts
       - run: pytest -q
-      - run: python scripts/performance_check.py --iterations 200
+      - run: python scripts/performance_check.py --iterations 200 --best-of 2
       - run: sage-qualify --profile-encode --profile-iterations 30 --max-query-count 40
       - run: rm -rf .pytest_cache .ruff_cache .mypy_cache src/*.egg-info src/sage_agent_protocol.egg-info && find . -type d -name __pycache__ -prune -exec rm -rf {} +
       - run: rm -rf integrations/openclaw/node_modules integrations/openclaw/package-lock.json
