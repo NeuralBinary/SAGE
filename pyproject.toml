@@ -32,7 +32,7 @@ Issues = "https://github.com/NeuralBinary/SAGE/issues"
 
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.3.4,<4"]
-mcp = ["mcp>=2,<3"]
+mcp = ["mcp>=1.9,<2"]
 bench = ["tiktoken>=0.13,<1"]
 otel = ["opentelemetry-api>=1.44,<2", "opentelemetry-sdk>=1.44,<2"]
 dev = [

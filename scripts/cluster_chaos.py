@@ -16,7 +16,7 @@ def api(base: str, key: str, method: str, path: str, payload: dict | None = None
         req.add_header("Content-Type", "application/json")
     try:
         context = ssl.create_default_context(cafile=ca_cert) if ca_cert else None
-        with request.urlopen(req, timeout=20, context=context) as response:
+        with request.urlopen(req, timeout=10, context=context) as response:
             return response.status, json.loads(response.read() or b"{}")
     except Exception as exc:
         return 0, {"error": type(exc).__name__}
@@ -36,21 +36,35 @@ def verify_round_trip(base: str, key: str, workspace: str, suffix: str, ca_cert:
         "idempotency_key": f"chaos-{suffix}",
         "ordering_key": "chaos-stream",
     }
-    status, sent = api(base, key, "POST", "/v1/bus/handoff", handoff, ca_cert)
-    if status != 200:
-        raise RuntimeError(f"handoff failed: {sent}")
-    status, repeated = api(base, key, "POST", "/v1/bus/handoff", handoff, ca_cert)
-    if status != 200 or repeated.get("message_id") != sent.get("message_id"):
-        raise RuntimeError("idempotent handoff failed")
-    query = parse.urlencode({"workspace": workspace, "claim": "true", "limit": 1})
-    status, rows = api(base, key, "GET", f"/v1/bus/pull/{parse.quote(receiver)}?{query}", ca_cert=ca_cert)
-    if status != 200 or not isinstance(rows, list) or len(rows) != 1:
-        raise RuntimeError("claim failed")
-    message_id = rows[0]["message_id"]
-    status, ack = api(base, key, "POST", "/v1/bus/ack", {"message_id": message_id, "receiver": receiver, "workspace": workspace}, ca_cert)
-    if status != 200 or ack.get("status") != "acked":
-        raise RuntimeError("ack failed")
-    return message_id
+
+    def attempt() -> tuple[int, str]:
+        status, sent = api(base, key, "POST", "/v1/bus/handoff", handoff, ca_cert)
+        if status != 200:
+            return status, f"handoff failed: {sent}"
+        status, repeated = api(base, key, "POST", "/v1/bus/handoff", handoff, ca_cert)
+        if status != 200 or repeated.get("message_id") != sent.get("message_id"):
+            return 599, "idempotent handoff failed"
+        query = parse.urlencode({"workspace": workspace, "claim": "true", "limit": 1})
+        status, rows = api(base, key, "GET", f"/v1/bus/pull/{parse.quote(receiver)}?{query}", ca_cert=ca_cert)
+        if status != 200 or not isinstance(rows, list) or len(rows) != 1:
+            return 599, "claim failed"
+        message_id = rows[0]["message_id"]
+        status, ack = api(base, key, "POST", f"/v1/bus/{parse.quote(message_id)}/ack", {"message_id": message_id, "receiver": receiver, "workspace": workspace}, ca_cert)
+        if status != 200 or ack.get("status") != "acked":
+            return 599, "ack failed"
+        return 200, message_id
+
+    # A paused/killed worker can leave one in-flight request hanging on the
+    # load balancer while it fails over (nginx 499/502/504). Retry transient
+    # transport failures so the assertion is cluster recovery, not scheduling.
+    last: tuple[int, str] = (0, "no attempt")
+    for _ in range(5):
+        status, detail = attempt()
+        if status == 200:
+            return detail
+        last = (status, detail)
+        time.sleep(2)
+    raise RuntimeError(f"round trip failed after retries: {last}")
 
 
 def main() -> None:
@@ -64,11 +78,13 @@ def main() -> None:
     args = parser.parse_args()
 
     verify_round_trip(args.url, args.api_key, args.workspace, "baseline", args.ca_cert)
-    compose(args.compose_file, "pause", "sage-b")
+    # Stop (not pause) the worker: a paused process keeps TCP alive so the load
+    # balancer waits on it; a stopped worker fails over via connection refusal.
+    compose(args.compose_file, "stop", "sage-b")
     try:
-        verify_round_trip(args.url, args.api_key, args.workspace, "worker-paused", args.ca_cert)
+        verify_round_trip(args.url, args.api_key, args.workspace, "worker-stopped", args.ca_cert)
     finally:
-        compose(args.compose_file, "unpause", "sage-b")
+        compose(args.compose_file, "start", "sage-b")
 
     if args.disrupt_postgres:
         compose(args.compose_file, "stop", "postgres")

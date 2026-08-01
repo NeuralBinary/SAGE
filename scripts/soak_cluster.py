@@ -42,7 +42,7 @@ def worker(base: str, key: str, workspace: str, index: int, ca_cert: str | None 
     pull_status, pull_latency, pulled = call(base, key, "GET", f"/v1/bus/pull/{parse.quote(receiver)}?{query}", ca_cert=ca_cert)
     if pull_status != 200 or not isinstance(pulled, list) or len(pulled) != 1 or pulled[0].get("message_id") != message_id:
         return False, send_latency + pull_latency
-    ack_status, ack_latency, acked = call(base, key, "POST", "/v1/bus/ack", {
+    ack_status, ack_latency, acked = call(base, key, "POST", f"/v1/bus/{parse.quote(message_id)}/ack", {
         "message_id": message_id, "receiver": receiver, "workspace": workspace,
     }, ca_cert)
     return ack_status == 200 and acked.get("status") == "acked", send_latency + pull_latency + ack_latency

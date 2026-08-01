@@ -94,7 +94,7 @@ def build_wheel(root: Path, output: Path, epoch: int) -> Path:
     env["SOURCE_DATE_EPOCH"] = str(epoch)
     with tempfile.TemporaryDirectory(prefix="sage-wheel-") as temporary:
         temp = Path(temporary)
-        subprocess.run(
+        result = subprocess.run(
             [
                 sys.executable,
                 "-m",
@@ -106,10 +106,16 @@ def build_wheel(root: Path, output: Path, epoch: int) -> Path:
                 "--wheel-dir",
                 str(temp),
             ],
+            check=False,
+            capture_output=True,
+            text=True,
             cwd=root,
             env=env,
-            check=True,
         )
+        if result.returncode != 0:
+            raise SystemExit(
+                f"pip wheel failed (exit {result.returncode}):\n{result.stdout}\n{result.stderr}"
+            )
         wheels = list(temp.glob("*.whl"))
         if len(wheels) != 1:
             raise RuntimeError(f"expected one wheel, found {wheels}")
