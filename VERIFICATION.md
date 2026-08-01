@@ -245,7 +245,7 @@ The PostgreSQL CI job uses PostgreSQL 18 with configured-database mode and runs 
 
 ## API and protocol artifacts
 
-The FastAPI OpenAPI document builds as OpenAPI 3.1.0 with 81 paths, title `SAGE`, and version 0.2.1.
+The FastAPI OpenAPI document builds as OpenAPI 3.1.0 with 81 paths, title `SAGE`, and version 0.2.2.
 
 Normative JSON Schemas, protobuf binding, Markdown protocol specification, generated TypeScript/Go wire metadata, and TCK artifacts are generated or checked from the frozen v0.2 protocol model. The installed Python package mirrors the repository hierarchy under `sage_plugin/spec/schemas/`.
 
@@ -286,11 +286,11 @@ deployment conventions.
 
 ## Distribution qualification
 
-The Python wheel builds as `sage_agent_protocol-0.2.1-py3-none-any.whl`. `scripts/package_check.py` verifies package metadata, author, Hermes entry point, protocol specification, protobuf binding, nested JSON Schemas, TCK implementation matrix, and TCK vectors directly from the wheel archive. The source tree also ships a standalone Hermes plugin directory and installer; release consistency requires the standalone adapter to remain byte-identical to the packaged Hermes adapter.
+The Python wheel builds as `sage_agent_protocol-0.2.2-py3-none-any.whl`. `scripts/package_check.py` verifies package metadata, author, Hermes entry point, protocol specification, protobuf binding, nested JSON Schemas, TCK implementation matrix, and TCK vectors directly from the wheel archive. The source tree also ships a standalone Hermes plugin directory and installer; release consistency requires the standalone adapter to remain byte-identical to the packaged Hermes adapter.
 
-The wheel installs into an isolated target, imports as 0.2.1 with author NeuralBinary, exposes `sage = sage_plugin.hermes_plugin`, contains all 11 normative JSON Schemas under `sage_plugin/spec/schemas/`, and passes 13/13 TCK vectors plus 250/250 malformed-wire checks from the installed package.
+The wheel installs into an isolated target, imports as 0.2.2 with author NeuralBinary, exposes `sage = sage_plugin.hermes_plugin`, contains all 11 normative JSON Schemas under `sage_plugin/spec/schemas/`, and passes 13/13 TCK vectors plus 250/250 malformed-wire checks from the installed package.
 
-The OpenClaw archive builds as `@sage-agent/openclaw-sage@0.2.1`. `scripts/package_check.py` verifies its metadata, author, credits, plugin manifest, runtime, conformance runner, and TCK content. The packed JavaScript runtime and conformance runner pass syntax checking, its independent TCK passes 13/13 vectors, and the adapter harness verifies object content, defensive JSON-object recovery, plain-text rejection, and semantic-envelope rejection.
+The OpenClaw archive builds as `@sage-agent/openclaw-sage@0.2.2`. `scripts/package_check.py` verifies its metadata, author, credits, plugin manifest, runtime, conformance runner, and TCK content. The packed JavaScript runtime and conformance runner pass syntax checking, its independent TCK passes 13/13 vectors, and the adapter harness verifies object content, defensive JSON-object recovery, plain-text rejection, and semantic-envelope rejection.
 
 ## Reproducibility and release policy
 
