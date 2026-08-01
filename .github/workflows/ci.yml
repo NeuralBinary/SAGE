@@ -33,6 +33,14 @@ jobs:
       - run: python scripts/performance_check.py --iterations 80
       - run: sage-qualify --profile-encode --profile-iterations 30 --max-query-count 40
       - run: rm -rf .pytest_cache .ruff_cache .mypy_cache src/*.egg-info src/sage_agent_protocol.egg-info && find . -type d -name __pycache__ -prune -exec rm -rf {} +
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.15.0"
+      - run: npm install --ignore-scripts
+        working-directory: integrations/openclaw
+      - run: npm run build
+        working-directory: integrations/openclaw
+      - run: rm -rf integrations/openclaw/node_modules integrations/openclaw/package-lock.json
       - run: python scripts/release_check.py
       - name: Migration verification
         env:
@@ -132,9 +140,9 @@ jobs:
       - run: python scripts/build_release.py --output dist --skip-openclaw
       - run: |
           python scripts/package_check.py \
-            --source dist/sage-plugin-v0.2.1.zip \
-            --wheel dist/sage_agent_protocol-0.2.1-py3-none-any.whl \
-            --hermes dist/sage-hermes-plugin-v0.2.1.zip
+            --source dist/sage-plugin-v0.2.2.zip \
+            --wheel dist/sage_agent_protocol-0.2.2-py3-none-any.whl \
+            --hermes dist/sage-hermes-plugin-v0.2.2.zip
       - run: docker build -t sage-agent-protocol:test .
 
 
@@ -183,4 +191,6 @@ jobs:
             --disrupt-postgres
       - name: Stop staging cluster
         if: always()
-        run: docker compose -f deploy/staging/compose.yml down -v --remove-orphans
+        run: |
+          docker compose -f deploy/staging/compose.yml logs --no-color postgres migrate sage-a sage-b sage-c gateway || true
+          docker compose -f deploy/staging/compose.yml down -v --remove-orphans

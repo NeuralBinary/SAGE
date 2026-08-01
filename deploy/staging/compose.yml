@@ -11,7 +11,7 @@ services:
       timeout: 3s
       retries: 20
     volumes:
-      - sage_staging_pg:/var/lib/postgresql/data
+      - sage_staging_pg:/var/lib/postgresql
 
   migrate:
     build:
