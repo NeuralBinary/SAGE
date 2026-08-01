@@ -47,7 +47,7 @@ def verify_round_trip(base: str, key: str, workspace: str, suffix: str, ca_cert:
     if status != 200 or not isinstance(rows, list) or len(rows) != 1:
         raise RuntimeError("claim failed")
     message_id = rows[0]["message_id"]
-    status, ack = api(base, key, "POST", "/v1/bus/ack", {"message_id": message_id, "receiver": receiver, "workspace": workspace}, ca_cert)
+    status, ack = api(base, key, "POST", f"/v1/bus/{parse.quote(message_id)}/ack", {"message_id": message_id, "receiver": receiver, "workspace": workspace}, ca_cert)
     if status != 200 or ack.get("status") != "acked":
         raise RuntimeError("ack failed")
     return message_id

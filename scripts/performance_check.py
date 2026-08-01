@@ -21,6 +21,10 @@ def percentile(values: list[float], fraction: float) -> float:
 
 
 def measure(call, iterations: int) -> tuple[list[float], list[object]]:
+    # Warm up so cold-start effects (imports, caches, connection pools) do not
+    # distort the steady-state latency percentiles being verified.
+    for _ in range(5):
+        call()
     elapsed: list[float] = []
     values: list[object] = []
     for _ in range(iterations):
