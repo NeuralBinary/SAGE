@@ -1,0 +1,46 @@
+site_name: SAGE
+site_description: SAGE — vendor-neutral semantic communication runtime and durable context bus for AI agents
+site_url: https://neuralbinary.github.io/SAGE/
+repo_url: https://github.com/NeuralBinary/SAGE
+docs_dir: site
+site_dir: site-out
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - toc.integrate
+markdown_extensions:
+  - admonition
+  - codehilite
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+plugins:
+  - search
+nav:
+  - Home: index.md
+  - Quickstart: Quickstart.md
+  - Configuration: Configuration.md
+  - Architecture: Architecture.md
+  - Protocol: Protocol.md
+  - CLI Tools: CLI-Tools.md
+  - Adapters: Adapters.md
+  - Development: Development.md
+  - Production: Production.md
+  - FAQ: FAQ.md
