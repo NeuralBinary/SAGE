@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     max_packet_bytes: int = 8192
     default_token_budget: int = 1200
     chars_per_token_estimate: float = 4.0
+    context_accounting_enabled: bool = False
     semantic_threshold: float = 0.93
     semantic_lossless_threshold: float = 0.985
     semantic_lsh_bits: int = 10

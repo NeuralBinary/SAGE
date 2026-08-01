@@ -7,6 +7,7 @@ from typing import Any, cast
 
 from sqlalchemy.orm import Session
 
+from . import context_accounting
 from .cache import CacheStore, cache_key
 from .codebook import Codebook
 from .compiler import compile_content
@@ -44,6 +45,8 @@ class SageCodec:
         self.cache = CacheStore(db, settings.semantic_cache_ttl_seconds)
         self.telemetry = Telemetry(settings)
         self.wire_codec = WireCodec(settings)
+        self.accounting = context_accounting.collector(False)
+        self._report_history = context_accounting.ContextReportHistory()
 
     def _budget_bytes(self, request: EncodeRequest) -> tuple[int, int | None]:
         token_budget = request.budget.max_tokens if request.budget and request.budget.max_tokens else self.settings.default_token_budget
@@ -65,6 +68,34 @@ class SageCodec:
 
     def _packet_id(self) -> str:
         return "P" + uuid.uuid4().hex
+
+    def _begin_accounting(self) -> context_accounting.ContextAccounting:
+        """Start a fresh per-exchange recorder (shared no-op when disabled).
+
+        The recorder is call-local: it is deliberately NOT stored on the
+        instance, so overlapping encode/decode calls on a shared codec
+        cannot clobber each other's accounting. Completed reports are
+        published thread-safely via ``_publish_report``.
+        """
+        return context_accounting.collector(self.settings.context_accounting_enabled)
+
+    def _publish_report(self, report: context_accounting.ContextReport) -> None:
+        """Thread-safely publish a completed exchange's report snapshot."""
+        self._report_history.publish(report)
+
+    def context_report(self) -> context_accounting.ContextReport | None:
+        """Snapshot of the most recently COMPLETED exchange, or None when
+        accounting is disabled or no exchange has completed yet."""
+        return self._report_history.most_recent()
+
+    def context_reports(self, limit: int = 10) -> list[context_accounting.ContextReport]:
+        """The last ``limit`` completed per-exchange reports, most recent first.
+
+        Empty when accounting is disabled. Each entry is an immutable
+        snapshot, so overlapping encode/decode calls cannot clobber or
+        corrupt a completed report.
+        """
+        return self._report_history.recent(limit)
 
     def compact(self, packet: Packet) -> dict[str, Any]:
         return self.wire_codec.compact(packet)
@@ -317,6 +348,7 @@ class SageCodec:
         input_raw = canonical_bytes(request.content)
         if len(input_raw) > self.settings.max_input_bytes:
             raise ValueError(f"payload exceeds max_input_bytes={self.settings.max_input_bytes}")
+        accounting = self._begin_accounting()
         provenance = self._provenance(request)
         byte_budget, token_budget = self._budget_bytes(request)
         decisions: list[dict[str, Any]] = [
@@ -345,6 +377,8 @@ class SageCodec:
                 request.fallback_mode = cast(FallbackMode, "natural_language" if "natural_language" in fallback_modes else str(fallback_modes[0]))
                 decisions.append({"action": "fallback_negotiated", "mode": request.fallback_mode})
         cb_fingerprint = self.codebook.fingerprint(codebook_name)
+        if accounting.enabled:
+            accounting.record_codebook_fingerprint(cb_fingerprint)
         cache_descriptor = {
             "content": request.content,
             "sender": request.sender,
@@ -456,9 +490,34 @@ class SageCodec:
             out_json, out_msgpack = len(json_wire.encode()), len(msgpack_wire)
             estimated_tokens = math.ceil(out_json / self.settings.chars_per_token_estimate)
 
+        if accounting.enabled:
+            accounting.record_exchange(packet.id, strategy)
+            accounting.record_wire_bytes(out_json, out_msgpack)
+            accounting.record_model_tokens(
+                context_accounting.estimate_tokens(json_wire, self.settings.chars_per_token_estimate)
+            )
+            if strategy in ("reference", "delta") or (strategy == "semantic" and isinstance(request.content, (dict, list))):
+                accounting.record_stored_bytes(len(input_raw))
+            for decision in decisions:
+                if decision.get("action") == "fallback_literal":
+                    accounting.record_fallback(str(decision.get("literal") or ""))
+                elif decision.get("action") == "pattern_promoted_to_shadow":
+                    accounting.record_pattern_definition(str(decision.get("canonical") or ""))
+
         semantic_loss = max([max(0.0, 1.0 - float(d.get("similarity", 1.0))) for d in decisions if d.get("action") == "semantic_code" and not d.get("surface_preserved") ] or [0.0])
         used_codes = {a.code for a in packet.atoms if a.code}
         known_ratio = (len(used_codes & known_codes) / len(used_codes)) if used_codes else 0.0
+        if accounting.enabled and used_codes:
+            missing = used_codes - known_codes
+            if missing:
+                try:
+                    for code in sorted(missing):
+                        concept = self.codebook.get_by_code(code)
+                        if concept is not None and concept.canonical:
+                            accounting.record_codebook_definition(code, concept.canonical)
+                except Exception:
+                    # accounting is additive: never let a definition lookup break encode
+                    pass
         pattern_count = sum(1 for d in decisions if d.get("action") == "pattern_code")
         ref_bytes_avoided = len(input_raw) if strategy == "reference" else 0
         audit = MessageAudit(
@@ -506,6 +565,8 @@ class SageCodec:
                 self.telemetry.add("pattern.count", pattern_count, strategy=strategy)
             if ref_bytes_avoided:
                 self.telemetry.add("ref.bytes_avoided", ref_bytes_avoided, strategy=strategy)
+        if accounting.enabled:
+            self._publish_report(accounting.snapshot())
         return EncodeResponse(
             packet=packet,
             wire_json=json_wire,
@@ -530,6 +591,9 @@ class SageCodec:
         workspace: str = "default",
         acknowledge: bool = False,
     ) -> DecodeResponse:
+        accounting = self._begin_accounting()
+        if accounting.enabled:
+            accounting.record_exchange(packet.id, packet.meta.get("strategy"))
         concepts: list[dict[str, Any]] = []
         literals: list[dict[str, Any]] = []
         for atom in packet.atoms:
@@ -558,13 +622,21 @@ class SageCodec:
                             "bindings": atom.literal if atom.has_literal else [],
                         }
                 concepts.append(decoded_concept)
+                if accounting.enabled:
+                    accounting.record_decoding_text(decoded_concept.get("canonical") or "", decoded_concept.get("literal"))
+                    if concept is None:
+                        accounting.record_fallback(str(atom.code))
             else:
                 literals.append({"literal": atom.literal, "path": atom.path, "epistemic_type": atom.epistemic_type})
+                if accounting.enabled:
+                    accounting.record_decoding_text("", atom.literal)
         references: list[dict[str, Any]] = []
         actor = receiver or packet.receiver
         for ref_id in packet.refs:
             try:
                 item = self.refs.get(ref_id, actor=actor, workspace=workspace)
+                if accounting.enabled and item is not None:
+                    accounting.record_reference_fetch(item.byte_size)
                 grant = self.refs.grant_metadata(ref_id, actor=actor, workspace=workspace) if item else None
                 references.append({
                     "ref": ref_id,
@@ -586,6 +658,8 @@ class SageCodec:
         if acknowledge and actor:
             self.knowledge.acknowledge(actor, packet, workspace)
             self.db.commit()
+        if accounting.enabled:
+            self._publish_report(accounting.snapshot())
         return DecodeResponse(
             act=packet.act,
             concepts=concepts,
