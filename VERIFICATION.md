@@ -9,12 +9,46 @@
 | Repository | https://github.com/NeuralBinary/SAGE |
 | Credits | @NeuralBinary, @ro0ti |
 | Public version | v0.2 |
-| Package version | 0.2.3 |
+| Package version | 0.2.4 |
 | Protocol | sage/0.2 |
 | Wire | 2 |
 | Database baseline | 0001_sage_0_2 |
 
 This report records qualification of the clean v0.2 first-deployment baseline on July 31, 2026. No pre-v0.2 protocol reader, compatibility layer, or migration chain is shipped.
+
+## v0.2.4 patch verification
+
+v0.2.4 is a patch release over the v0.2.3 baseline. Protocol `sage/0.2`, wire
+version `2`, the `0001_sage_0_2` migration baseline, and the 13 normative TCK
+vectors are unchanged.
+
+Verified for v0.2.4:
+
+- Full CI matrix green on the merged main (`ci` workflow, commit `7f13886`,
+  which carries the Issue #11 per-lifespan MCP fix and the GitHub Pages docs
+  site): Python 3.11/3.12/3.13/3.14 (ruff, TCK, conformance matrix incl.
+  JavaScript and Go, differential fuzzing, chaos suite, compileall, pytest,
+  latency gate, qualification), PostgreSQL qualification, OpenClaw adapter
+  (type-check, build, TCK, package check), package job (release_check,
+  build_release, package_check, Docker quick start), dependency audit, and
+  the staging TLS cluster (soak, TLS delivery, worker/database recovery,
+  stop logs).
+- `scripts/release_check.py` passes every version-consistency, protocol,
+  migration, schema, spec/protobuf, TCK-drift, and artifact gate for v0.2.4
+  (`{"ok":true,"version":"0.2.4",...}`).
+- Full automated suite: 115 tests pass with the `mcp` extra installed,
+  including the per-lifespan MCP regression coverage for Issue #11
+  (`tests/test_mcp_lifespan.py`); the mcp single-run session-manager
+  limitation no longer constrains the pytest phases.
+- `scripts/build_release.py` produces all six v0.2.4 assets
+  (`sage-plugin-v0.2.4.zip`, `sage-hermes-plugin-v0.2.4.zip`,
+  `sage_agent_protocol-0.2.4-py3-none-any.whl`,
+  `sage-agent-openclaw-sage-0.2.4.tgz`, `SAGE-v0.2.4-VERIFICATION.md`,
+  `SAGE-v0.2.4-SHA256SUMS.txt`), and `scripts/package_check.py` verifies the
+  source archive, wheel, Hermes plugin, and OpenClaw package for v0.2.4.
+
+The sections below record the v0.2.3 patch verification and the v0.2 baseline
+qualification, and remain the reference for surfaces unchanged by v0.2.4.
 
 ## v0.2.3 patch verification
 
