@@ -16,7 +16,7 @@ def api(base: str, key: str, method: str, path: str, payload: dict | None = None
         req.add_header("Content-Type", "application/json")
     try:
         context = ssl.create_default_context(cafile=ca_cert) if ca_cert else None
-        with request.urlopen(req, timeout=20, context=context) as response:
+        with request.urlopen(req, timeout=10, context=context) as response:
             return response.status, json.loads(response.read() or b"{}")
     except Exception as exc:
         return 0, {"error": type(exc).__name__}
