@@ -33,12 +33,7 @@ jobs:
 
       - name: Install and qualify Python source
         run: |
-          # Note: the mcp extra is intentionally not installed for the pytest
-          # phase. The mcp SDK's StreamableHTTPSessionManager is single-run per
-          # process, so repeated app startups (as TestClient does per test)
-          # fail when the integration is active. MCP is qualified separately in
-          # the CI package job via the build_server assertion.
-          python -m pip install -e '.[dev,bench,otel]'
+          python -m pip install -e '.[dev,mcp,bench,otel]'
           python -m compileall -q src tests scripts
           pytest -q
           rm -rf .pytest_cache .ruff_cache .mypy_cache build src/*.egg-info integrations/openclaw/node_modules integrations/openclaw/package-lock.json

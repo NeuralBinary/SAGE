@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -24,14 +25,50 @@ from .security import bearer_token
 REQUESTS = Counter("sage_http_requests_total", "SAGE HTTP requests", ["method", "path", "status"])
 LATENCY = Histogram("sage_http_request_seconds", "SAGE HTTP latency", ["method", "path"])
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 try:
     from .mcp_server import build_server
+except RuntimeError:  # pragma: no cover - MCP integration unavailable
+    build_server = None
 
-    mcp_server = build_server()
-    mcp_server.settings.streamable_http_path = "/"
-except RuntimeError:
-    mcp_server = None
+# The MCP server is built per-lifespan, never at import time: the SDK's
+# StreamableHTTPSessionManager.run() may only be entered once per FastMCP
+# instance, so a module-level singleton would break repeated app startups
+# (e.g. one TestClient per test) once its manager has been used.
+mcp_server: Any = None
+
+
+class _MCPMount:
+    """Delegating ASGI app mounted at /mcp; forwards to the live MCP app.
+
+    Starlette ``Mount`` objects are fixed at import time, so this wrapper
+    holds a mutable ``current`` reference that the lifespan swaps on every
+    startup/shutdown. Requests are forwarded to the per-lifespan MCP
+    sub-app, or answered with 404 when no lifespan has installed one.
+    """
+
+    def __init__(self) -> None:
+        self.current: Any = None
+        self.owner: Any = None
+        # (server, app) pairs for every lifespan currently inside
+        # session_manager.run(); the top pair owns current/owner.
+        self._stack: list[tuple[Any, Any]] = []
+
+    async def __call__(
+        self,
+        scope: dict[str, Any],
+        receive: Callable[[], Awaitable[dict[str, Any]]],
+        send: Callable[[dict[str, Any]], Awaitable[None]],
+    ) -> None:
+        app = self.current
+        if app is None:
+            await Response('{"detail":"mcp not available"}', status_code=404, media_type="application/json")(scope, receive, send)
+            return
+        await app(scope, receive, send)
+
+
+mcp_mount = _MCPMount()
 
 
 class _BodyTooLarge(Exception):
@@ -219,13 +256,49 @@ class BodyLimitMiddleware:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    global mcp_server
     if settings.auto_create_schema:
         init_db()
-    if mcp_server is None:
+    if build_server is None:
         yield
         return
-    async with mcp_server.session_manager.run():
+    try:
+        server = build_server()
+        server.settings.streamable_http_path = "/"
+        mcp_app = server.streamable_http_app()
+    except (RuntimeError, ImportError) as exc:
+        # MCP transport unavailable (e.g. the 'mcp' extra is not installed):
+        # keep running with MCP disabled instead of failing startup.
+        logger.warning("MCP disabled: build_server() failed: %s", exc)
         yield
+        return
+    mcp_server = server
+    mcp_mount.current = mcp_app
+    mcp_mount.owner = server
+    mcp_mount._stack.append((server, mcp_app))
+    try:
+        async with server.session_manager.run():
+            yield
+    finally:
+        # Manager has stopped; drop this lifespan's install. Owner-guarded:
+        # if this lifespan still owns the shared mount/global, hand it back
+        # to the previous live lifespan (nested TestClients / embedders), or
+        # clear it when this was the last one - an exiting lifespan must
+        # never clobber a still-running one.
+        for i, (s, _app) in enumerate(mcp_mount._stack):
+            if s is server:
+                del mcp_mount._stack[i]
+                break
+        if mcp_mount.owner is server and mcp_server is server:
+            if mcp_mount._stack:
+                top_server, top_app = mcp_mount._stack[-1]
+                mcp_server = top_server
+                mcp_mount.current = top_app
+                mcp_mount.owner = top_server
+            else:
+                mcp_mount.current = None
+                mcp_mount.owner = None
+                mcp_server = None
 
 
 app = FastAPI(
@@ -253,8 +326,7 @@ async def quota_error(_: Request, exc: QuotaExceededError) -> Response:
 async def backpressure_error(_: Request, exc: BackpressureError) -> Response:
     status = 503 if exc.state == "unavailable" else 429
     return Response(json.dumps({"detail": str(exc), "state": exc.state}), status_code=status, media_type="application/json", headers={"Retry-After": "1"})
-if mcp_server is not None:
-    app.mount("/mcp", mcp_server.streamable_http_app(), name="sage-mcp")
+app.mount("/mcp", mcp_mount, name="sage-mcp")
 
 
 def _valid_service_bearer(request: Request) -> bool:
