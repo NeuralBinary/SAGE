@@ -24,7 +24,7 @@ import sage_plugin.context_accounting as ca
 from sage_plugin.codec import SageCodec
 from sage_plugin.config import Settings
 from sage_plugin.db import SessionLocal
-from sage_plugin.schemas import EncodeRequest, Provenance
+from sage_plugin.schemas import Atom, EncodeRequest, Packet, Provenance
 from sage_plugin.state import StateStore
 
 PROV = Provenance(observed_at="2026-08-01T00:00:00+00:00", producer="alice")
@@ -420,6 +420,7 @@ def test_record_methods_never_raise_on_adversarial_inputs():
     # int() failures -> 0; str() always succeeds except for a raising
     # __str__, which maps to ""; str(None) == "None" as in plain Python
     assert rep.exchanges == 2
+    assert rep.packet_id == "123" and rep.strategy == "456"  # coerced to str
     assert rep.wire_bytes_json == 0 and rep.wire_bytes_msgpack == 0
     assert rep.stored_bytes == 0 and rep.model_tokens == 0
     assert rep.reference_fetch_count == 3 and rep.reference_fetch_bytes == 0
@@ -570,3 +571,44 @@ def test_context_reports_history_api_disabled_and_bounded():
     snap = history.most_recent()
     history.publish(ca.ContextReport(exchanges=1, packet_id="P6"))
     assert snap.packet_id == "P5"
+
+
+def test_text_recorders_survive_lone_surrogates():
+    """G1: lone-surrogate str inputs must not raise UnicodeEncodeError."""
+    acc = ca.ContextAccounting()
+    acc.record_codebook_fingerprint("\ud800")
+    acc.record_codebook_definition("C\ud800", "x")
+    acc.record_pattern_definition("\ud800")
+    acc.record_decoding_text("\ud800", "literal")
+    acc.record_fallback("\ud800")
+    rep = acc.snapshot()
+    # surrogate-safe byte counts (3 bytes per lone surrogate, CESU-8 style)
+    assert rep.codebook_setup_bytes == 9  # fp "\ud800" 3 + def "C\ud800 x" 6
+    assert rep.pattern_setup_bytes == 3
+    assert rep.decoding_bytes == len("\ud800 literal".encode("utf-8", errors="surrogatepass"))
+    assert rep.fallback_bytes == 3
+
+
+def test_decode_survives_lone_surrogate_atom_with_accounting_enabled():
+    """G1 (wire path): decoding a foreign packet carrying a \\ud800 escape
+    must not raise with accounting enabled (the pre-instrumentation codec
+    decodes the same packet fine)."""
+    with SessionLocal() as db:
+        settings = Settings(
+            auth_required=False, database_url="sqlite://", context_accounting_enabled=True
+        )
+        codec = SageCodec(db, settings)
+        packet = Packet(
+            cb="global",
+            sender="alice",
+            receiver="bob",
+            act="report",
+            prov=PROV,
+            atoms=[Atom(literal="bad \ud800 value", has_literal=True, path="$")],
+        )
+        decoded = codec.decode(packet, receiver="bob")
+        assert decoded.literals[0]["literal"] == "bad \ud800 value"
+        rep = codec.context_report()
+        assert rep is not None
+        assert rep.exchanges == 1
+        assert rep.decoding_bytes == len("bad \ud800 value".encode("utf-8", errors="surrogatepass"))

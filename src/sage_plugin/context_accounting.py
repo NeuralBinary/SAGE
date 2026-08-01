@@ -38,8 +38,8 @@ Design constraints
 * Additive: this module must never change wire output. It imports nothing
   from the rest of ``sage_plugin``. Recorders never raise on any input
   value; the only way a recorder can raise is a caller-supplied
-  ``estimate`` callable that itself raises (the default estimator never
-  raises).
+  ``estimate`` callable that misbehaves (raises, or returns a non-int);
+  the default estimator never raises.
 """
 
 from __future__ import annotations
@@ -87,6 +87,19 @@ def _coerce_text(value: Any, *, fallback: str = "") -> str:
         return str(value)
     except Exception:
         return fallback
+
+
+def _utf8_byte_length(text: str) -> int:
+    """UTF-8 byte length of ``text``, surrogate-safe; never raises.
+
+    Uses ``errors="surrogatepass"`` so lone surrogates (which arrive
+    naturally from JSON ``\\ud800``-style escapes and are legal inside a
+    Python ``str``) count as their 3-byte CESU-8-style encoding instead of
+    raising ``UnicodeEncodeError``. For every valid-Unicode string the
+    result is byte-identical to ``len(text.encode("utf-8"))``, so recorded
+    byte counts are unchanged for all well-formed input.
+    """
+    return len(text.encode("utf-8", errors="surrogatepass"))
 
 # ---------------------------------------------------------------------------
 # Token estimation
@@ -257,8 +270,8 @@ class ContextAccounting:
     One instance is used per encode/decode call; it is therefore not shared
     across threads. All record methods are additive and never raise on any
     input value; the only way a recorder can raise is a caller-supplied
-    ``estimate`` callable that itself raises (the default estimator never
-    raises).
+    ``estimate`` callable that misbehaves (raises, or returns a non-int);
+    the default estimator never raises.
     """
 
     def __init__(self, estimate: Callable[[str], int] = estimate_tokens, *, enabled: bool = True) -> None:
@@ -273,9 +286,9 @@ class ContextAccounting:
             return
         self._report.exchanges += 1
         if packet_id is not None:
-            self._report.packet_id = packet_id
+            self._report.packet_id = _coerce_text(packet_id)
         if strategy is not None:
-            self._report.strategy = strategy
+            self._report.strategy = _coerce_text(strategy)
 
     def record_wire_bytes(self, json_bytes: int, msgpack_bytes: int) -> None:
         if not self.enabled:
@@ -297,14 +310,14 @@ class ContextAccounting:
         if not self.enabled:
             return
         text = _coerce_text(fingerprint)
-        self._report.codebook_setup_bytes += len(text.encode("utf-8"))
+        self._report.codebook_setup_bytes += _utf8_byte_length(text)
         self._report.codebook_setup_tokens += self._estimate(text)
 
     def record_codebook_definition(self, code: str, canonical: str) -> None:
         if not self.enabled:
             return
         text = f"{_coerce_text(code)} {_coerce_text(canonical)}".strip()
-        self._report.codebook_setup_bytes += len(text.encode("utf-8"))
+        self._report.codebook_setup_bytes += _utf8_byte_length(text)
         self._report.codebook_setup_tokens += self._estimate(text)
         self._report.codebook_definitions += 1
 
@@ -312,7 +325,7 @@ class ContextAccounting:
         if not self.enabled:
             return
         text = _coerce_text(canonical)
-        self._report.pattern_setup_bytes += len(text.encode("utf-8"))
+        self._report.pattern_setup_bytes += _utf8_byte_length(text)
         self._report.pattern_setup_tokens += self._estimate(text)
         self._report.pattern_definitions += 1
 
@@ -321,7 +334,7 @@ class ContextAccounting:
             return
         parts = [p for p in (_coerce_text(canonical), _coerce_text(literal) if literal is not None else "") if p]
         text = " ".join(parts)
-        self._report.decoding_bytes += len(text.encode("utf-8"))
+        self._report.decoding_bytes += _utf8_byte_length(text)
         self._report.decoding_tokens += self._estimate(text)
 
     def record_reference_fetch(self, byte_size: int | None) -> None:
@@ -335,7 +348,7 @@ class ContextAccounting:
         if not self.enabled:
             return
         text = _coerce_text(text)
-        self._report.fallback_bytes += len(text.encode("utf-8"))
+        self._report.fallback_bytes += _utf8_byte_length(text)
         self._report.fallback_tokens += self._estimate(text)
         self._report.fallback_count += 1
 
