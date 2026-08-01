@@ -98,7 +98,8 @@ model-facing output tokens (tokens of the reconstructed context the
 receiver must read), encode/decode latency (measured with
 ``time.perf_counter``, rounded to ms -- reported ONLY in the JSON detail
 artifacts, never in the printed tables), reference-fetch volume
-(bytes/count), and a cumulative cost.  The cost model
+(bytes/count; ReferenceStore fetches only -- state-store resolves are not
+instrumented separately), and a cumulative cost.  The cost model
 is synthetic but deterministic and documented::
 
     cost_usd = wire_bytes_json * 0.0000005        # $0.50 / MB
@@ -146,7 +147,11 @@ use (baseline total minus variant total, divided by the 6 conversation
 turns), and break-even = ``ceil(setup_cost / max(saving_per_use, 1))``.
 When the saving per use is non-positive the denominator clamps to 1 and the
 break-even equals the setup cost -- interpret that as "does not break even";
-compare with the saving column.
+compare with the saving column.  Two semantics notes: (1) the codebook-setup
+component includes the ~24-byte codebook fingerprint re-sent on every
+exchange, so the setup cost is partly recurring (SAGE break-even values are
+therefore conservative); (2) a zero-setup/zero-saving variant prints
+``break_even 0`` -- immediately at parity, nothing to amortize.
 
 Determinism
 -----------
@@ -262,7 +267,17 @@ RETRIEVAL_KEYWORDS = frozenset(
 _STATE_FIELDS = ("deployment_allowed", "failed_tests", "migration_approved", "blocker")
 _RENDERED_RE = re.compile(r"\b(deployment_allowed|failed_tests|migration_approved|blocker)\s*:\s*([a-z0-9_.]+)")
 _DIGIT_RE = re.compile(r"(?<!\d)(\d+)(?!\d)")
-# Sentence boundaries: ". "/"; " sequences, newlines, and the '","' separator
+# Word-boundary matchers for the fidelity number/constraint checkers.
+# The negative lookarounds also exclude hyphenated compounds ("thirty-three")
+# and prefixed forms ("bypass", "threefold", "someone") so a CONTRADICTED or
+# unrelated word cannot satisfy a preservation check.
+_NUM_WORD_RE = {
+    "three": re.compile(r"(?<![\w-])three(?![\w-])"),
+    "two": re.compile(r"(?<![\w-])two(?![\w-])"),
+    "one": re.compile(r"(?<![\w-])one(?![\w-])"),
+}
+_PASS_WORD_RE = re.compile(r"(?<![\w-])pass(?:es|ed|ing)?(?![\w-])")
+# Sentence boundaries: ". " / "; " sequences, newlines, and the '","' separator
 # that joins messages inside minified-JSON / msgpack reconstructions.
 _SENTENCE_RE = re.compile(r"[.;]\s+|,\s*\"|\n+")
 
@@ -446,9 +461,11 @@ def retrieval_select(messages: list[str], max_results: int = RETRIEVAL_MAX_RESUL
 
 def stance(text: str) -> str | None:
     t = _norm(text)
-    if "ready for production deployment" in t or "deployment_allowed: true" in t:
+    # ``_norm`` maps underscores to spaces, so the rendered-state markers are
+    # matched in their normalized form ("deployment allowed: true/false").
+    if "ready for production deployment" in t or "deployment allowed: true" in t:
         return "allowed"
-    if "blocked" in t or "not allowed" in t or "deployment_allowed: false" in t:
+    if "blocked" in t or "not allowed" in t or "deployment allowed: false" in t:
         return "not_allowed"
     return None
 
@@ -456,21 +473,25 @@ def stance(text: str) -> str | None:
 def fidelity_negation(turn_texts: list[str]) -> float:
     """Stance of the deployment-allowed fact, per turn (5 instances)."""
     expected = ["not_allowed", "not_allowed", "not_allowed", "not_allowed", "allowed"]
-    correct = sum(1 for text, want in zip(turn_texts, expected, strict=True) if stance(text) == want)
+    # strict=False: shorter inputs (e.g. empty) score 0.0 rather than raising
+    correct = sum(1 for text, want in zip(turn_texts, expected, strict=False) if stance(text) == want)
     return correct / len(expected)
 
 
 def _has_digit(text: str, digit: str) -> bool:
-    match = _DIGIT_RE.search(text)
-    return bool(match and match.group(1) == digit)
+    """True when ``digit`` appears as a standalone number anywhere in ``text``."""
+    return any(run == digit for run in _DIGIT_RE.findall(text))
 
 
 def fidelity_numeric(turn_texts: list[str]) -> float:
     """Numbers 'three'/'two'/'one' recoverable from turns 1-3."""
-    t1, t2, t3 = (_norm(text) for text in turn_texts[:3])
-    ok1 = ("three" in t1) or _has_digit(t1, "3")
-    ok2 = "two" in t2
-    ok3 = "one" in t3
+    texts = [""] * 3
+    for index, text in enumerate(turn_texts[:3]):
+        texts[index] = _norm(text)
+    t1, t2, t3 = texts
+    ok1 = bool(_NUM_WORD_RE["three"].search(t1)) or _has_digit(t1, "3")
+    ok2 = bool(_NUM_WORD_RE["two"].search(t2)) or _has_digit(t2, "2")
+    ok3 = bool(_NUM_WORD_RE["one"].search(t3)) or _has_digit(t3, "1")
     return sum([ok1, ok2, ok3]) / 3
 
 
@@ -489,20 +510,25 @@ def fidelity_ordering(final_text: str) -> float:
 
 def fidelity_changed_value(final_text: str) -> float:
     t = _norm(final_text)
-    has_old = ("three" in t) or _has_digit(t, "3")
-    has_new = ("one" in t) or ("two" in t) or _has_digit(t, "1")
+    has_old = bool(_NUM_WORD_RE["three"].search(t)) or _has_digit(t, "3")
+    has_new = bool(_NUM_WORD_RE["one"].search(t)) or bool(_NUM_WORD_RE["two"].search(t)) or _has_digit(t, "1")
     return 1.0 if (has_old and has_new) else 0.0
 
 
 def fidelity_contradiction(final_text: str) -> float:
+    """The migration-failure -> migration-approved transition must be
+    recoverable: both markers present AND the failure precedes the approval
+    (an approval followed by a later failure is the opposite transition)."""
     t = _norm(final_text)
-    return 1.0 if ("migration" in t and "failure" in t and "approved" in t) else 0.0
+    if "migration" not in t or "failure" not in t or "approved" not in t:
+        return 0.0
+    return 1.0 if t.index("failure") < t.index("approved") else 0.0
 
 
 def fidelity_critical(final_text: str) -> float:
     """Two Phase-1 constraints must survive into the final reconstruction."""
     t = _norm(final_text)
-    c1 = "production deployment" in t and "integration test" in t and "pass" in t
+    c1 = "production deployment" in t and "integration test" in t and bool(_PASS_WORD_RE.search(t))
     c2 = "migration" in t and "review" in t and "platform team" in t
     return (float(c1) + float(c2)) / 2.0
 
@@ -572,15 +598,25 @@ def evaluate_reconstruction(turn_texts: list[str]) -> dict[str, Any]:
 
     ``turn_texts`` holds six texts (index 0 = the shared context; indices
     1..5 = the reconstruction after each update).  Constraint compliance is
-    scored on the final reconstruction.
+    scored on the final reconstruction.  Empty or short inputs score the
+    turns that exist (and 0.0 when none exist) rather than raising, so the
+    function stays safe for direct unit use.
     """
-    per_turn = [evaluate_turn(read_state(turn_texts[index]), turn_texts[index], index) for index in range(1, 6)]
+    per_turn = [evaluate_turn(read_state(turn_texts[index]), turn_texts[index], index) for index in range(1, min(6, len(turn_texts)))]
+    if not per_turn:
+        return {
+            "qa_accuracy": 0.0,
+            "state_accuracy": 0.0,
+            "constraint_compliance": 0.0,
+            "action_accuracy": 0.0,
+            "task_success": 0.0,
+        }
     qa_accuracy = statistics.mean(item["qa_correct"] / item["qa_total"] for item in per_turn)
     state_accuracy = statistics.mean(item["state_correct"] / item["state_total"] for item in per_turn)
     action_accuracy = statistics.mean(item["action_correct"] for item in per_turn)
-    final_text = turn_texts[5]
-    c1 = "production deployment" in _norm(final_text) and "integration test" in _norm(final_text) and "pass" in _norm(final_text)
-    c2 = "migration" in _norm(final_text) and "review" in _norm(final_text) and "platform team" in _norm(final_text)
+    final_text = _norm(turn_texts[min(5, len(turn_texts) - 1)])
+    c1 = "production deployment" in final_text and "integration test" in final_text and bool(_PASS_WORD_RE.search(final_text))
+    c2 = "migration" in final_text and "review" in final_text and "platform team" in final_text
     constraint_compliance = (float(c1) + float(c2)) / 2.0
     return {
         "qa_accuracy": qa_accuracy,

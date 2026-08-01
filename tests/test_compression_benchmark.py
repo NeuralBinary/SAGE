@@ -174,6 +174,48 @@ def test_fidelity_checkers_on_known_inputs(cb):
     # critical facts: both Phase-1 constraints must survive
     assert cb.fidelity_critical(full) == 1.0
     assert cb.fidelity_critical("The platform team approved the migration.") == 0.0
+    # a CONTRADICTED constraint ("bypass" contains "pass") must not score
+    assert cb.fidelity_critical("Production deployments can bypass integration tests.") == 0.0
+
+    # rendered-state stance markers (hardening F1): the checkers must match
+    # the same "key: value" forms the state variants reconstruct
+    rendered = "blocker: integration_tests; deployment_allowed: false; failed_tests: 3; migration_approved: false"
+    rendered_ok = "deployment_allowed: true; blocker: none"
+    assert cb.stance(rendered) == "not_allowed"
+    assert cb.stance(rendered_ok) == "allowed"
+    assert cb.fidelity_negation([rendered] * 4 + [rendered_ok]) == 1.0
+
+    # changed value with a leading 0 digit (hardening F2): the target digits
+    # appear LATER than the first digit run and must still be found
+    assert cb.fidelity_changed_value("failed_tests: 0; failed_tests: 3; failed_tests: 1") == 1.0
+
+    # number words need word boundaries (hardening F3): "threefold"/"someone"
+    # are not the numbers "three"/"one"
+    assert cb.fidelity_numeric(["threefold increase in failures", "fixed two failures", "one failure remains"]) == 2 / 3
+    assert cb.fidelity_numeric(["integration tests failed", "fixed two failures", "someone fixed it"]) == 1 / 3
+
+    # contradiction is directional (hardening F4): approval followed by a
+    # later failure is the opposite transition and must not pass
+    assert cb.fidelity_contradiction("The platform team approved the migration. One database migration failure remains.") == 0.0
+
+
+def test_fidelity_and_task_helpers_tolerate_empty_inputs(cb):
+    """Hardening F5: the public helpers must not raise on empty input."""
+    assert cb.fidelity_scores([], "") == {
+        "negation": 0.0,
+        "numeric": 0.0,
+        "ownership": 0.0,
+        "temporal_ordering": 0.0,
+        "changed_value": 0.0,
+        "contradiction": 0.0,
+        "critical_fact_recall": 0.0,
+    }
+    empty = cb.evaluate_reconstruction([])
+    assert empty["task_success"] == 0.0
+    assert empty["qa_accuracy"] == 0.0 and empty["state_accuracy"] == 0.0
+    # short inputs score the turns that exist rather than raising
+    short = cb.evaluate_reconstruction([cb.SHARED_CONTEXT, "Project Phoenix is blocked because three integration tests failed."])
+    assert 0.0 <= short["task_success"] <= 1.0
 
 
 def test_state_reader_rendered_and_natural_forms(cb):
