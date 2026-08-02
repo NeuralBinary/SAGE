@@ -9,12 +9,68 @@
 | Repository | https://github.com/NeuralBinary/SAGE |
 | Credits | @NeuralBinary, @ro0ti |
 | Public version | v0.2 |
-| Package version | 0.2.4 |
+| Package version | 0.2.5 |
 | Protocol | sage/0.2 |
 | Wire | 2 |
 | Database baseline | 0001_sage_0_2 |
 
 This report records qualification of the clean v0.2 first-deployment baseline on July 31, 2026. No pre-v0.2 protocol reader, compatibility layer, or migration chain is shipped.
+
+## v0.2.5 patch verification
+
+v0.2.5 is a patch release over the v0.2.4 baseline. Protocol `sage/0.2`, wire
+version `2`, the `0001_sage_0_2` migration baseline, and the 13 normative TCK
+vectors are unchanged.
+
+v0.2.5 ships the Issue #16 semantic-context-compression cycle as four additive
+stages, each merged to main as its own PR:
+
+- Stage 1 — context accounting: PR #17 (`7a9725b`) adds default-off
+  (`SAGE_CONTEXT_ACCOUNTING_ENABLED`) instrumentation
+  (`src/sage_plugin/context_accounting.py`) through the real `codec.py`
+  encode/decode paths; wire bytes are unchanged (TCK vectors byte-identical).
+- Stage 2 — deterministic multi-turn compression benchmark: PR #18
+  (`c19c581`) adds `scripts/compression_benchmark.py` (12 RFC variants,
+  efficiency/task/fidelity/amortization tables, fully deterministic).
+- Stage 3 — model evaluation harness: PR #19 (`aaf3663`) adds
+  `scripts/model_eval_harness.py` (cold/warm receivers, at least two model
+  families, RFC six-column result table, decoder-assisted token accounting;
+  no provider, no fabricated numbers).
+- Stage 4 — benchmark feedback loop + docs: PR #20 (`e1d7b14`) adds the
+  harness `--record-feedback` flag (`PatternStore.record_feedback`,
+  additive `feedback` JSON key, zero wire-byte change) and the benchmark
+  documentation.
+
+Verified for v0.2.5:
+
+- Full automated suite: 184 tests pass with the `[dev,mcp]` extra installed
+  (`uv run --with '.[dev,mcp]' pytest -o addopts='' -q`): 151 pre-existing
+  tests plus 33 new tests added across the Issue #16 cycle (context
+  accounting, compression-benchmark determinism, model-eval harness, and the
+  feedback loop).
+- `scripts/release_check.py` passes every version-consistency, protocol,
+  migration, schema, spec/protobuf, TCK-drift, and artifact gate for v0.2.5
+  (`{"ok":true,"version":"0.2.5",...}`).
+- `scripts/build_release.py` produces all six v0.2.5 assets
+  (`sage-plugin-v0.2.5.zip`, `sage-hermes-plugin-v0.2.5.zip`,
+  `sage_agent_protocol-0.2.5-py3-none-any.whl`,
+  `sage-agent-openclaw-sage-0.2.5.tgz`, `SAGE-v0.2.5-VERIFICATION.md`,
+  `SAGE-v0.2.5-SHA256SUMS.txt`), and `scripts/package_check.py` verifies the
+  source archive, wheel, Hermes plugin, and OpenClaw package for v0.2.5
+  (`{"ok":true,...}`).
+- CI on main is 8/9 green for the Issue #16 commits. The PostgreSQL
+  qualification job carries a PRE-EXISTING failure:
+  `tests/test_context_accounting.py::test_decode_survives_corrupted_byte_size_reference_row`
+  (a stage-1 hardening regression test) corrupts `references.byte_size` to a
+  non-integer via raw SQL, which SQLite's untyped columns accept but
+  PostgreSQL's strict typing rejects — the test errors at the UPDATE, before
+  exercising the decode path it guards. The failure reproduces identically on
+  `c19c581` (stage 2) and is unrelated to this release's changes; it is
+  tracked as pre-existing CI debt for the next cycle.
+
+The sections below record the v0.2.4 patch verification, the v0.2.3 patch
+verification, and the v0.2 baseline qualification, and remain the reference
+for surfaces unchanged by v0.2.5.
 
 ## v0.2.4 patch verification
 

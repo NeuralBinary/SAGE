@@ -12,7 +12,7 @@ SAGE core is independent of model providers and agent frameworks. Native and pro
 | Repository | https://github.com/NeuralBinary/SAGE |
 | Credits | @NeuralBinary, @ro0ti |
 | Public version | v0.2 |
-| Package version | 0.2.2 |
+| Package version | 0.2.5 |
 | Protocol | `sage/0.2` |
 | Wire version | `2` |
 | License | MIT |
@@ -31,7 +31,7 @@ SAGE core is independent of model providers and agent frameworks. Native and pro
 
 ## Quick links
 
-- [Quickstart](Quickstart.md) — install the v0.2.2 release, run the service, Docker quickstart, Hermes and OpenClaw plugins
+- [Quickstart](Quickstart.md) — install the v0.2.5 release, run the service, Docker quickstart, Hermes and OpenClaw plugins
 - [Configuration](Configuration.md) — full environment-variable reference and production rules
 - [Architecture](Architecture.md) — semantic bus, references, deltas, patterns, adapters, deployment topology
 - [Protocol](Protocol.md) — the `sage/0.2` wire protocol, canonical encoding, TCK, delivery semantics
@@ -41,29 +41,31 @@ SAGE core is independent of model providers and agent frameworks. Native and pro
 - [Production](Production.md) — Compose topologies, TLS, migrations, containers, monitoring
 - [FAQ](FAQ.md) — common questions
 
-## Current release: v0.2.2
+## Current release: v0.2.5
 
-v0.2.2 is a patch release over v0.2.1. Protocol `sage/0.2`, wire version `2`, the `0001_sage_0_2` migration baseline, and the 13 normative TCK vectors are unchanged — no breaking changes, and v0.2.1 peers interoperate with v0.2.2 peers.
+v0.2.5 is a patch release over v0.2.4. Protocol `sage/0.2`, wire version `2`, the `0001_sage_0_2` migration baseline, and the 13 normative TCK vectors are unchanged — no breaking changes, and v0.2.4 peers interoperate with v0.2.5 peers.
 
-Release assets (published on the [v0.2.2 GitHub release](https://github.com/NeuralBinary/SAGE/releases/tag/v0.2.2)):
+Release assets (published on the [v0.2.5 GitHub release](https://github.com/NeuralBinary/SAGE/releases/tag/v0.2.5)):
 
 | Asset | Name |
 | --- | --- |
-| Python wheel | `sage_agent_protocol-0.2.2-py3-none-any.whl` |
-| Hermes plugin ZIP | `sage-hermes-plugin-v0.2.2.zip` |
-| OpenClaw package | `sage-agent-openclaw-sage-0.2.2.tgz` |
-| Source ZIP | `sage-plugin-v0.2.2.zip` |
-| Verification report | `SAGE-v0.2.2-VERIFICATION.md` |
-| Checksums | `SAGE-v0.2.2-SHA256SUMS.txt` |
+| Python wheel | `sage_agent_protocol-0.2.5-py3-none-any.whl` |
+| Hermes plugin ZIP | `sage-hermes-plugin-v0.2.5.zip` |
+| OpenClaw package | `sage-agent-openclaw-sage-0.2.5.tgz` |
+| Source ZIP | `sage-plugin-v0.2.5.zip` |
+| Verification report | `SAGE-v0.2.5-VERIFICATION.md` |
+| Checksums | `SAGE-v0.2.5-SHA256SUMS.txt` |
 
-Key v0.2.2 fixes:
+What's new in v0.2.5 (the [Issue #16](https://github.com/NeuralBinary/SAGE/issues/16) semantic-context-compression cycle):
 
-- **Default SQLite path independent of the working directory (Issue #1).** The default database is now `sqlite:///$HOME/sage.db` (the current user's home directory), never a working-directory-relative `./sage.db`. An explicit `SAGE_DATABASE_URL` remains authoritative.
-- **OpenClaw adapter type-check/build and conformance surface restored (Issue #3).**
+- **Context accounting (PR #17).** Default-off (`SAGE_CONTEXT_ACCOUNTING_ENABLED`) instrumentation records per-exchange transport bytes, model-facing token estimates, codebook/pattern setup cost, and reference-fetch volume through the real codec paths — wire byte-identical.
+- **Deterministic multi-turn compression benchmark (PR #18).** `scripts/compression_benchmark.py` carries a fixed six-turn conversation through twelve RFC "Phoenix" variants with efficiency, task, fidelity, and amortization tables; the codebook variant (v09) uses 1,172 wire bytes vs 2,027 for the full-context baseline — about 42% less wire — with full semantic fidelity.
+- **Model evaluation harness (PR #19).** `scripts/model_eval_harness.py` measures downstream task success on real model runtimes — cold vs warm receivers, at least two model families, RFC six-column result table; provider numbers are never fabricated.
+- **Benchmark feedback loop (PR #20).** The harness's `--record-feedback` flag records measured task success via `PatternStore.record_feedback` as an additive `feedback` JSON key, with zero wire-byte change. See the [Benchmark](Benchmark.md) page.
 
 ## Verification
 
-The repository ships a verification record (`VERIFICATION.md` in the repo root). v0.2.2 was qualified against the installed wheel with 111 passing tests, 13/13 Python TCK vectors, and a passing `scripts/release_check.py`. Release CI independently runs the JavaScript and Go conformance runners, differential fuzzing, the Docker quick-start gate, and the staging cluster.
+The repository ships a verification record (`VERIFICATION.md` in the repo root). v0.2.5 was qualified against the installed wheel with 184 passing tests, 13/13 Python TCK vectors, and a passing `scripts/release_check.py`. Release CI independently runs the JavaScript and Go conformance runners, differential fuzzing, the Docker quick-start gate, and the staging cluster.
 
 ## License and attribution
 

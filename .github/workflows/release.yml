@@ -52,16 +52,16 @@ jobs:
       - name: Verify packaged assets
         run: |
           python scripts/package_check.py \
-            --source dist/sage-plugin-v0.2.4.zip \
-            --wheel dist/sage_agent_protocol-0.2.4-py3-none-any.whl \
-            --hermes dist/sage-hermes-plugin-v0.2.4.zip \
-            --openclaw dist/sage-agent-openclaw-sage-0.2.4.tgz
+            --source dist/sage-plugin-v0.2.5.zip \
+            --wheel dist/sage_agent_protocol-0.2.5-py3-none-any.whl \
+            --hermes dist/sage-hermes-plugin-v0.2.5.zip \
+            --openclaw dist/sage-agent-openclaw-sage-0.2.5.tgz
           node scripts/openclaw_adapter_check.mjs
 
       - name: Test the installed wheel
         run: |
           python -m venv /tmp/sage-release-venv
-          /tmp/sage-release-venv/bin/python -m pip install dist/sage_agent_protocol-0.2.4-py3-none-any.whl
+          /tmp/sage-release-venv/bin/python -m pip install dist/sage_agent_protocol-0.2.5-py3-none-any.whl
           /tmp/sage-release-venv/bin/sage-doctor --help
           /tmp/sage-release-venv/bin/sage-demo --help
 
@@ -81,5 +81,5 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" dist/* \
               --title "SAGE $GITHUB_REF_NAME" \
-              --notes-file RELEASE-v0.2.4.md
+              --notes-file RELEASE-v0.2.5.md
           fi
