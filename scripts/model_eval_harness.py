@@ -730,6 +730,13 @@ def _record_feedback_for_packets(
     additive JSON only, never a change to any existing field.
 
     ``packets`` is a list of ``(turn, packet_id)`` pairs for one SAGE variant.
+
+    NOTE (cumulative semantics): each packet's ``patterns_updated`` field is
+    CUMULATIVE -- ``len(merged)`` across all packets processed so far for
+    this variant (``merged`` accumulates outside the packet loop), NOT a
+    per-packet count.  The variant-level ``patterns_updated`` list in the
+    returned summary is the authoritative merged per-pattern before/after
+    view.
     """
     if not 0.0 <= task_success <= 1.0:
         raise ValueError("task_success must be in [0, 1]")
@@ -1044,9 +1051,10 @@ def main(argv: list[str] | None = None) -> int:
 
     # Reject an --output path that exists as a FILE before anything runs (no
     # traceback, no wasted adapter calls).  The directory itself is only
-    # created AFTER the adapters config has loaded AND the --variants value
-    # has validated, so no config-error path leaves an empty output dir
-    # behind.
+    # created AFTER run_harness has succeeded, immediately before the
+    # artifacts are written (see below), so NO validation or error path --
+    # missing adapters, empty --variants, unknown variant id, adapter
+    # failure -- leaves an empty output dir behind.
     output_dir: Path | None = None
     if args.output is not None:
         out: Path = args.output
@@ -1080,11 +1088,6 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         variants = [item for item in segments if item]
-
-    # Create the output dir only now -- adapters loaded AND --variants
-    # validated -- so no config-error path leaves an empty directory behind.
-    if output_dir is not None:
-        output_dir.mkdir(parents=True, exist_ok=True)
 
     # Bind a STABLE per-process scratch database BEFORE any sage_plugin import
     # (db.py creates the engine at import time).  The file lives in
@@ -1125,6 +1128,12 @@ def main(argv: list[str] | None = None) -> int:
         print()
         print(_format_delta_table(results["deltas"]))
     if output_dir is not None:
+        # Create the output dir only now: run_harness has fully succeeded
+        # (adapters loaded, --variants validated, every variant id known,
+        # adapters ran without error), and this dir is only ever used by
+        # _write_artifacts -- so every validation/error path above exits
+        # without leaving an empty directory behind.
+        output_dir.mkdir(parents=True, exist_ok=True)
         try:
             _write_artifacts(output_dir, results)
         except RuntimeError as exc:

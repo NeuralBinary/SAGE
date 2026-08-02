@@ -401,3 +401,26 @@ def test_record_feedback_zero_wire_byte_change(h, scratch_dir):
         assert row_off["variant"] == row_on["variant"]
         assert row_off["turn"] == row_on["turn"]
         assert row_off["wire_bytes"] == row_on["wire_bytes"]
+
+
+def test_unknown_variant_leaves_no_output_dir(scratch_dir):
+    """Adversary finding #1: an unknown --variants id (v99) exits 2 via the
+    unknown-variant ValueError inside run_harness -- and the --output dir
+    must NOT be left behind (the mkdir happens only AFTER run_harness has
+    succeeded, just before the artifacts are written, so no validation/error
+    path leaves an empty dir). Mirrors
+    test_model_eval_harness.py's test_missing_adapters_leaves_no_output_dir
+    / test_empty_variants_leaves_no_output_dir, run via a fresh subprocess
+    (the prebound-engine guard makes in-process happy-path runs impossible).
+    """
+    cfg = scratch_dir / "adapters.json"
+    cfg.write_text(json.dumps(_adapters_config()))
+    fake_home = scratch_dir / "fakehome"
+    fake_home.mkdir()
+    out_dir = scratch_dir / "must-not-exist"
+    completed = _run_cli_subprocess(
+        ["--adapters", str(cfg), "--output", str(out_dir), "--variants", "v99"], fake_home
+    )
+    assert completed.returncode == 2
+    assert "unknown variant id" in completed.stderr
+    assert not out_dir.exists()
