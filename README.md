@@ -419,6 +419,14 @@ SAGE_BENCH_LLM_PROVIDER=fake uv run --with '.[dev,mcp]' \
     python scripts/model_eval_harness.py --adapters adapters.json --output /path/outside/repo
 ```
 
+The harness also ships a sealed evaluation mode (issue #22): with `--sealed`
+the adapter sees only the compact packet — never source content or answer
+keys — scores are computed harness-side against the private answer key, and
+`--held-out` evaluates the SAGE variants on unseen conversations with a frozen
+codebook and a lifecycle-primed warm receiver. See the
+[Benchmark page](https://neuralbinary.github.io/SAGE/Benchmark/) of the docs
+site.
+
 No-fabrication rule: every figure in these tools is either deterministic (measured locally) or comes from a configured external runtime's reply; a missing provider is reported as `not run, no provider`, never estimated.
 
 ## Development
