@@ -132,6 +132,64 @@ NOT a rendering defect (the rendering is faithful to the codec packet and
 round-trips) -- and sealed v11 / v10-turn-0 scores must be read as
 reconstruction-fidelity signals until stage 4.
 
+Held-out mode (issue #22, stage 3 -- unseen conversations, ``--held-out``,
+default OFF)
+--------------------------------------------------------------------------------
+``--held-out`` (requires ``--sealed``; a clean exit-2 error otherwise)
+evaluates the sealed harness against a HELD-OUT scenario
+(``scripts/heldout_scenario.py``): the codebook/pattern establishment phase
+material is FROZEN before the held-out updates are revealed.  Three phases:
+
+* ESTABLISHMENT -- a NEW project ("Orion": distinct names/facts, so every
+  canonical clause differs from the default Phoenix scenario) is transmitted
+  once as the shared context.  This is the ONLY material the SAGE variants'
+  FROZEN codebook is compiled from (``heldout_scenario.establishment_canonicals``
+  -- the sorted canonical clauses of ``ESTABLISHMENT_SHARED_CONTEXT`` alone).
+* FROZEN CODEBOOK -- the SAGE variants' codebook is pinned to the
+  establishment canonicals BEFORE any held-out update is revealed.  The
+  held-out updates (>= 8, covering every issue section-C content type:
+  paraphrased concept / unseen value / new combination of known concepts /
+  changed state / contradiction / negation / numeric constraint /
+  delayed-relevance) are compiled but their canonicals are deliberately NOT
+  in the frozen codebook (proven by the frozen-codebook-proof test).
+* HELD-OUT UPDATES -- the updates are revealed and the six-turn sealed
+  exchange loop runs exactly as in the standard scenario, but the scenario
+  globals of the loaded benchmark module (``SHARED_CONTEXT`` / ``UPDATES`` /
+  ``STATE_DICTS`` / ``CHANGE_MARKERS``) are patched from the held-out fixture
+  BEFORE the spec builders / benchmark / scoring read them (they resolve the
+  globals at call time), so ``run_benchmark``, the plain variants, the SAGE
+  variants and the sealed scorer all operate on the held-out material.
+
+SAGE variants run in BOTH explicitly-labeled codebook modes:
+
+* ``oracle_codebook: true`` -- the ORACLE codebook (compiled from the
+  establishment material AND all held-out updates, as ``cb._sage_specs()``
+  does): the benchmark-recorded upper bound where the codebook was allowed to
+  see everything.  Rows are the standard sealed rows against the patched
+  scenario; their variant_name carries a `` [oracle]`` suffix.
+* ``oracle_codebook: false`` -- the FROZEN establishment-only codebook:
+  spec copies of the oracle SAGE specs with the ``codebook`` field replaced
+  by the sorted establishment canonicals, deterministically re-encoded
+  through the REAL codec (``_render_frozen_variant_packets``, mirroring
+  ``_render_sage_variant_packets``: schema reset, codebook registration in
+  order, pinned packet ids, v10 pattern warm-up).  Their wire bytes ARE the
+  measurement -- no benchmark-recorded counterpart exists for the frozen
+  codebook -- and they differ from the oracle rows' (the smaller frozen
+  codebook inlines more literals).  Their variant_name carries a
+  `` [frozen]`` suffix.
+
+Every held-out row carries ``oracle_codebook: true|false`` (true for the
+oracle SAGE rows, false for the frozen SAGE rows and the plain variants --
+a plain variant has no codebook mode; the label is false), and the artifact
+gains top-level keys ``dataset_split: "held_out"`` and ``oracle_codebook``
+(a mapping of each evaluated SAGE variant to its modes,
+``{"v09": ["frozen", "oracle"], ...}``).  ``--held-out`` cannot be combined
+with ``--record-feedback`` (clean exit-2 error): feedback-loop semantics are
+defined against the standard scenario; held-out feedback is a future
+refinement.  Default OFF keeps every artifact byte-identical to the
+stage-1/2 sealed shape (no ``dataset_split`` / ``oracle_codebook`` keys, no
+mode suffixes).
+
 RFC field mapping (per result row)
 ----------------------------------
 * receiver model        -> ``receiver_model`` (the config identity)
@@ -597,12 +655,17 @@ def _render_sage_variant_packets(cb: Any, variant_spec: dict[str, Any]) -> dict[
 #: determined by the variant spec and the freshly reset schema, so re-encodes
 #: are cached per key (the wire-bytes honesty gate in the tests proves the
 #: cached rendering corresponds to the benchmark's recorded packet).  NOTE:
-#: the cache is PER-PROCESS and benchmark-fixed -- the harness always renders
-#: against the same ``cb`` module whose ``_sage_specs()`` are module-constant,
-#: so (variant id, turn) fully identifies the spec.  If this were ever reused
-#: with a different benchmark module sharing variant ids, the key would need
-#: the spec identity (or a spec fingerprint).
-_PACKET_RENDER_CACHE: dict[tuple[str, int], str] = {}
+#: the cache is PER-PROCESS and scenario-tagged -- ``_SCENARIO_TAG`` is set by
+#: ``_apply_scenario`` before any rendering happens, and the tag is part of
+#: every key, so a process that evaluates more than one scenario (standard and
+#: held-out) never serves a rendering compiled against the wrong fixture.
+_PACKET_RENDER_CACHE: dict[tuple[str, str, int], str] = {}
+
+
+#: Current scenario tag for the per-process render/spec caches.  ``"default"``
+#: for the standard Phoenix scenario; ``"held_out"`` while the harness is
+#: evaluating the frozen-codebook split.
+_SCENARIO_TAG: str = "default"
 
 
 def _render_actual_packet(cb: Any, variant_spec: dict[str, Any], turn: int) -> str:
@@ -610,33 +673,119 @@ def _render_actual_packet(cb: Any, variant_spec: dict[str, Any], turn: int) -> s
 
     A canonical compact-JSON rendering of the REAL codec packet for the
     ``(variant, turn)``, deterministically re-encoded exactly like the
-    benchmark (see ``_render_sage_variant_packets``) and cached per key.
+    benchmark (see ``_render_sage_variant_packets``) and cached per
+    (scenario tag, variant, turn).
     """
-    key = (variant_spec["id"], turn)
+    key = (_SCENARIO_TAG, variant_spec["id"], turn)
     cached = _PACKET_RENDER_CACHE.get(key)
     if cached is not None:
         return cached
     for t, entry in _render_sage_variant_packets(cb, variant_spec).items():
-        _PACKET_RENDER_CACHE[(variant_spec["id"], t)] = entry["rendering"]
+        _PACKET_RENDER_CACHE[(_SCENARIO_TAG, variant_spec["id"], t)] = entry["rendering"]
     return _PACKET_RENDER_CACHE[key]
 
 
-_SAGE_VARIANT_SPECS_CACHE: dict[str, dict[str, Any]] = {}
+_SAGE_VARIANT_SPECS_CACHE: dict[tuple[str, str], dict[str, Any]] = {}
 
 
 def _sage_variant_spec(cb: Any, variant_id: str) -> dict[str, Any]:
-    """The stage-2 benchmark's spec for a SAGE variant (cached)."""
-    spec = _SAGE_VARIANT_SPECS_CACHE.get(variant_id)
+    """The stage-2 benchmark's spec for a SAGE variant (cached per scenario).
+
+    The cache key carries ``_SCENARIO_TAG`` because the spec is built from
+    ``cb._sage_specs()``, which reads the scenario globals at call time -- the
+    held-out fixture yields DIFFERENT specs (oracle codebook over the
+    held-out material) than the standard fixture.
+    """
+    key = (_SCENARIO_TAG, variant_id)
+    spec = _SAGE_VARIANT_SPECS_CACHE.get(key)
     if spec is None:
         spec = next((s for s in cb._sage_specs() if s["id"] == variant_id), None)
         if spec is None:
             raise RuntimeError(f"unknown SAGE variant {variant_id!r} in sealed packet rendering")
-        _SAGE_VARIANT_SPECS_CACHE[variant_id] = spec
+        _SAGE_VARIANT_SPECS_CACHE[key] = spec
     return spec
 
 
-def _build_exchanges(cb: Any, benchmark: dict[str, Any], selected: list[str]) -> list[dict[str, Any]]:
-    """Per-variant per-turn exchange records (representation, wire bytes, ...)."""
+#: Frozen-codebook re-encode cache: per (scenario tag, variant), the full
+#: per-turn rendering dict from ``_render_frozen_variant_packets``.  The
+#: frozen codebook is the same sorted establishment-canonical list for every
+#: variant of one held-out run, so the (tag, variant) key identifies the
+#: re-encode.
+_FROZEN_PACKET_RENDER_CACHE: dict[tuple[str, str], dict[int, dict[str, Any]]] = {}
+
+
+def _render_frozen_variant_packets(
+    cb: Any, variant_spec: dict[str, Any], frozen_codebook: list[str]
+) -> dict[int, dict[str, Any]]:
+    """Re-encode a SAGE variant against the FROZEN establishment-only codebook.
+
+    A copy of the ORACLE spec (``cb._sage_specs()`` under the patched
+    held-out globals) with the ``codebook`` field REPLACED by the sorted
+    establishment canonicals, re-encoded through the REAL codec exactly like
+    ``_render_sage_variant_packets`` (schema reset, codebook registration in
+    order, pinned packet ids, the v10 pattern warm-up).  The resulting wire
+    bytes ARE the frozen-codebook measurement -- no benchmark-recorded
+    counterpart exists -- and they differ from the oracle rows' (the smaller
+    frozen codebook inlines more literals).  Deterministic: two calls return
+    byte-identical renderings (cached per scenario tag + variant).
+    """
+    key = (_SCENARIO_TAG, variant_spec["id"])
+    cached = _FROZEN_PACKET_RENDER_CACHE.get(key)
+    if cached is not None:
+        return cached
+    frozen_spec = dict(variant_spec)
+    frozen_spec["codebook"] = list(frozen_codebook)
+    rendered = _render_sage_variant_packets(cb, frozen_spec)
+    _FROZEN_PACKET_RENDER_CACHE[key] = rendered
+    return rendered
+
+
+def _apply_scenario(cb: Any, *, held_out: bool) -> list[str] | None:
+    """Point the loaded benchmark module at the requested scenario.
+
+    The benchmark's spec builders (``_plain_specs`` / ``_sage_specs``), its
+    ``run_benchmark`` records, ``ground_truth_answers`` / ``evaluate_turn``
+    and the harness's sealed scoring all resolve the scenario globals
+    (``SHARED_CONTEXT`` / ``UPDATES`` / ``STATE_DICTS`` / ``CHANGE_MARKERS``)
+    AT CALL TIME, so patching them before anything reads them switches the
+    whole pipeline to the held-out fixture without touching the frozen
+    benchmark file.  Also tags the per-process render/spec caches.
+
+    Returns the FROZEN codebook (the sorted establishment canonicals) when
+    ``held_out`` is true -- the SAGE variants' frozen ``codebook`` list -- and
+    ``None`` for the standard scenario.
+    """
+    global _SCENARIO_TAG
+    if not held_out:
+        _SCENARIO_TAG = "default"
+        return None
+    spec = importlib.util.spec_from_file_location(
+        "heldout_scenario", Path(__file__).resolve().parent / "heldout_scenario.py"
+    )
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    cb.SHARED_CONTEXT = module.ESTABLISHMENT_SHARED_CONTEXT
+    cb.UPDATES = module.HELDOUT_UPDATES
+    cb.STATE_DICTS = module.HELDOUT_STATE_DICTS
+    cb.CHANGE_MARKERS = module.HELDOUT_CHANGE_MARKERS
+    _SCENARIO_TAG = "held_out"
+    return module.establishment_canonicals(cb)
+
+
+def _build_exchanges(
+    cb: Any, benchmark: dict[str, Any], selected: list[str], *, held_out: bool = False
+) -> list[dict[str, Any]]:
+    """Per-variant per-turn exchange records (representation, wire bytes, ...).
+
+    In held-out mode every exchange carries an ``oracle_codebook`` label
+    (``True`` for the ORACLE SAGE rows -- the benchmark-recorded upper bound
+    against the patched held-out scenario -- ``False`` for the plain
+    variants, which have no codebook mode) and the SAGE variant_name gains a
+    `` [oracle]`` suffix so rows, payloads, table cells and delta rows
+    distinguish the codebook modes.  Default OFF keeps the stage-1/2 shape
+    byte-identical (no label, no suffix).
+    """
     plain = {spec["id"]: spec for spec in cb._plain_specs()}
     sage = {spec["id"]: spec for spec in cb._sage_specs()}
     by_id = {row["variant_id"]: row for row in benchmark["variants"]}
@@ -662,19 +811,67 @@ def _build_exchanges(cb: Any, benchmark: dict[str, Any], selected: list[str]) ->
                 else:
                     content = cb.SHARED_CONTEXT if turn == 0 else cb.UPDATES[turn - 1]
                 representation = turn_record["reconstruction"]
+            exchange = {
+                "variant": variant_id,
+                "variant_name": variant_row["name"],
+                "turn": turn,
+                "phase": turn_record["phase"],
+                "content": content,
+                "representation": representation,
+                "wire_bytes": turn_record["wire_bytes_json"],
+                "reconstruction": turn_record["reconstruction"],
+                "expected": cb.ground_truth_answers(turn),
+                "change_markers": cb.CHANGE_MARKERS.get(turn, []),
+                "sage": is_sage,
+            }
+            if held_out:
+                if is_sage:
+                    exchange["variant_name"] = f"{exchange['variant_name']} [oracle]"
+                    exchange["oracle_codebook"] = True
+                else:
+                    exchange["oracle_codebook"] = False
+            exchanges.append(exchange)
+    return exchanges
+
+
+def _build_frozen_exchanges(
+    cb: Any, selected: list[str], frozen_codebook: list[str]
+) -> list[dict[str, Any]]:
+    """Frozen-codebook exchange records for the held-out SAGE variants.
+
+    For every selected SAGE variant the ORACLE spec (``cb._sage_specs()``
+    under the patched held-out globals) is re-encoded through the REAL codec
+    with the ``codebook`` field REPLACED by the sorted establishment
+    canonicals (``_render_frozen_variant_packets``).  The re-encode's wire
+    bytes ARE the frozen measurement -- no benchmark-recorded counterpart
+    exists for the frozen codebook -- and its rendering is the sealed
+    model-facing packet.  Rows carry ``oracle_codebook: False`` and a
+    `` [frozen]`` variant_name suffix.
+    """
+    sage = {spec["id"]: spec for spec in cb._sage_specs()}
+    exchanges: list[dict[str, Any]] = []
+    for variant_id in selected:
+        spec = sage.get(variant_id)
+        if spec is None:
+            continue  # plain variants have no codebook mode
+        rendered = _render_frozen_variant_packets(cb, spec, frozen_codebook)
+        for turn in range(6):
+            entry = rendered[turn]
             exchanges.append(
                 {
                     "variant": variant_id,
-                    "variant_name": variant_row["name"],
+                    "variant_name": f"{spec['name']} [frozen]",
                     "turn": turn,
-                    "phase": turn_record["phase"],
-                    "content": content,
-                    "representation": representation,
-                    "wire_bytes": turn_record["wire_bytes_json"],
-                    "reconstruction": turn_record["reconstruction"],
+                    "phase": "shared" if turn == 0 else "update",
+                    "content": spec["content_fn"](turn),
+                    "representation": entry["rendering"],
+                    "wire_bytes": entry["wire_bytes_json"],
+                    "reconstruction": entry["reconstruction"],
                     "expected": cb.ground_truth_answers(turn),
                     "change_markers": cb.CHANGE_MARKERS.get(turn, []),
-                    "sage": is_sage,
+                    "sage": True,
+                    "frozen": True,
+                    "oracle_codebook": False,
                 }
             )
     return exchanges
@@ -753,9 +950,16 @@ def _build_sealed_payload(
     ``global:1``), the receiver state and the decoder configuration.
     """
     if exchange["sage"] and decoder_mode == "direct-symbolic":
-        model_facing = _render_actual_packet(
-            cb, _sage_variant_spec(cb, exchange["variant"]), exchange["turn"]
-        )
+        if exchange.get("frozen"):
+            # FROZEN-codebook mode (held-out, issue #22 stage 3): the model
+            # faces the re-encoded packet for the frozen establishment-only
+            # codebook -- the rendering the frozen exchange already carries
+            # (``_render_frozen_variant_packets`` output).
+            model_facing = exchange["representation"]
+        else:
+            model_facing = _render_actual_packet(
+                cb, _sage_variant_spec(cb, exchange["variant"]), exchange["turn"]
+            )
     else:
         model_facing = exchange["reconstruction"]
     if exchange["variant"] in _STATE_VARIANTS:
@@ -1067,48 +1271,73 @@ def _row_from_sealed_result(
     }
 
 
+def _row_codebook_mode(row: dict[str, Any]) -> str:
+    """Grouping discriminator for the two SAGE codebook modes.
+
+    ``"true"`` for oracle-codebook rows, ``"false"`` for frozen-codebook
+    (and plain held-out) rows, ``"default"`` when the row carries no
+    ``oracle_codebook`` label (standard scenario) -- the mode is uniform per
+    run, so the oracle and frozen rows of the same SAGE variant never merge
+    and default-OFF grouping stays byte-identical to the stage-1/2 shape.
+    """
+    if row.get("oracle_codebook") is True:
+        return "true"
+    if row.get("oracle_codebook") is False:
+        return "false"
+    return "default"
+
+
 def _aggregate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """One RFC-table row per (variant, receiver, cold/warm) combination."""
-    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    """One RFC-table row per (variant, codebook mode, receiver, cold/warm)."""
+    grouped: dict[tuple[str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
-        grouped[(row["variant"], row["receiver_model"], row["receiver_state"])].append(row)
+        grouped[
+            (row["variant"], _row_codebook_mode(row), row["receiver_model"], row["receiver_state"])
+        ].append(row)
     table_rows: list[dict[str, Any]] = []
     for key in sorted(grouped):
         items = sorted(grouped[key], key=lambda item: item["turn"])
         first = items[0]
-        table_rows.append(
-            {
-                "variant_cell": (
-                    f"{first['variant']} {first['variant_name']} [{first['receiver_model']}] {first['receiver_state']}"
-                ),
-                "variant": first["variant"],
-                "variant_name": first["variant_name"],
-                "receiver_model": first["receiver_model"],
-                "model_family": first["model_family"],
-                "model_version": first["model_version"],
-                "codebook_version": first["codebook_version"],
-                "decoder_configuration": first["decoder_configuration"],
-                "symbolic_examples": first["symbolic_examples"],
-                "receiver_state": first["receiver_state"],
-                "wire_bytes": sum(item["wire_bytes"] for item in items),
-                "input_tokens": sum(item["input_tokens"] for item in items),
-                "output_tokens": sum(item["output_tokens"] for item in items),
-                "cost_usd": round(sum(item["cost_usd"] for item in items), 6),
-                "task_accuracy": round(statistics.mean(item["task_success"] for item in items), 6),
-                "critical_fact_recall": items[-1]["critical_fact_recall"],
-            }
-        )
+        table_row = {
+            "variant_cell": (
+                f"{first['variant']} {first['variant_name']} [{first['receiver_model']}] {first['receiver_state']}"
+            ),
+            "variant": first["variant"],
+            "variant_name": first["variant_name"],
+            "receiver_model": first["receiver_model"],
+            "model_family": first["model_family"],
+            "model_version": first["model_version"],
+            "codebook_version": first["codebook_version"],
+            "decoder_configuration": first["decoder_configuration"],
+            "symbolic_examples": first["symbolic_examples"],
+            "receiver_state": first["receiver_state"],
+            "wire_bytes": sum(item["wire_bytes"] for item in items),
+            "input_tokens": sum(item["input_tokens"] for item in items),
+            "output_tokens": sum(item["output_tokens"] for item in items),
+            "cost_usd": round(sum(item["cost_usd"] for item in items), 6),
+            "task_accuracy": round(statistics.mean(item["task_success"] for item in items), 6),
+            "critical_fact_recall": items[-1]["critical_fact_recall"],
+        }
+        if "oracle_codebook" in first:
+            # Held-out mode only: keep the codebook-mode label on the table row
+            # so delta grouping (and consumers) can tell the two SAGE modes
+            # apart.  Default-OFF table rows carry no such key (byte-identical
+            # to the stage-1/2 shape).
+            table_row["oracle_codebook"] = first["oracle_codebook"]
+        table_rows.append(table_row)
     return table_rows
 
 
 def _warm_vs_cold_deltas(table_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Warm-minus-cold deltas per (variant, receiver) pair."""
-    by_pair: dict[tuple[str, str], dict[str, dict[str, Any]]] = defaultdict(dict)
+    """Warm-minus-cold deltas per (variant, codebook mode, receiver) pair."""
+    by_pair: dict[tuple[str, str, str], dict[str, dict[str, Any]]] = defaultdict(dict)
     for row in table_rows:
-        by_pair[(row["variant"], row["receiver_model"])][row["receiver_state"]] = row
+        by_pair[(row["variant"], _row_codebook_mode(row), row["receiver_model"])][
+            row["receiver_state"]
+        ] = row
     deltas: list[dict[str, Any]] = []
-    for (variant_id, receiver) in sorted(by_pair):
-        pair = by_pair[(variant_id, receiver)]
+    for (variant_id, _mode, receiver) in sorted(by_pair):
+        pair = by_pair[(variant_id, _mode, receiver)]
         if "cold" not in pair or "warm" not in pair:
             continue
         cold, warm = pair["cold"], pair["warm"]
@@ -1374,6 +1603,7 @@ def run_harness(
     timeout: float = 120.0,
     record_feedback: bool = False,
     sealed: bool = False,
+    held_out: bool = False,
 ) -> dict[str, Any]:
     """Run the model evaluation harness end-to-end and return the full results.
 
@@ -1392,11 +1622,37 @@ def run_harness(
     top-level ``evaluation_boundary: "sealed"`` key; default OFF keeps every
     artifact byte-identical to the stage-3/4 shape (no such key).
 
+    With ``held_out=True`` (issue #22, stage 3 -- REQUIRES ``sealed=True``;
+    a ``ValueError`` otherwise) the scenario globals of the loaded benchmark
+    module are patched from ``scripts/heldout_scenario.py`` BEFORE the
+    benchmark/specs/scoring read them, the SAGE variants run in BOTH
+    explicitly-labeled codebook modes (``oracle_codebook: true`` -- the
+    benchmark-recorded upper bound over the held-out material -- and
+    ``oracle_codebook: false`` -- the FROZEN establishment-only codebook,
+    re-encoded for real; see the module docstring's held-out section), every
+    row carries an ``oracle_codebook`` label, and the results dict gains
+    top-level ``dataset_split: "held_out"`` + ``oracle_codebook`` keys.
+    ``held_out`` cannot be combined with ``record_feedback`` (a
+    ``ValueError``): feedback-loop semantics are defined against the standard
+    scenario; held-out feedback is a future refinement.  Default OFF keeps
+    every artifact byte-identical to the stage-1/2 sealed shape.
+
     Raises ``ValueError`` for invalid configuration (including configs with
     fewer than 2 distinct model families) and ``RuntimeError`` for adapter
     failures or a missing ``SAGE_DATABASE_URL`` -- results are never
     fabricated.
     """
+    if held_out and not sealed:
+        raise ValueError(
+            "held_out requires sealed=True (--held-out must be combined with --sealed): "
+            "the frozen-codebook split is a sealed-boundary evaluation"
+        )
+    if held_out and record_feedback:
+        raise ValueError(
+            "held_out cannot be combined with record_feedback: feedback-loop semantics "
+            "are defined against the standard scenario; held-out feedback is a future "
+            "refinement"
+        )
     if not os.environ.get("SAGE_DATABASE_URL", "").strip():
         raise RuntimeError(
             "SAGE_DATABASE_URL is not set; set it to a writable scratch database "
@@ -1410,13 +1666,23 @@ def run_harness(
     if decoder_mode not in DECODER_MODES:
         raise ValueError(f"decoder_mode must be one of {DECODER_MODES}")
     cb = _load_compression_benchmark()
+    # Patch the scenario globals BEFORE anything reads them: the spec builders
+    # (_plain_specs/_sage_specs), run_benchmark's records, ground_truth_answers
+    # / evaluate_turn and the sealed scorer all resolve SHARED_CONTEXT /
+    # UPDATES / STATE_DICTS / CHANGE_MARKERS at call time.
+    frozen_codebook = _apply_scenario(cb, held_out=held_out)
     benchmark = cb.run_benchmark(out_dir=None)
     selected = variants if variants is not None else list(_ALL_VARIANT_IDS)
     known = {row["variant_id"] for row in benchmark["variants"]}
     for variant_id in selected:
         if variant_id not in known:
             raise ValueError(f"unknown variant id {variant_id!r}; expected one of {sorted(known)}")
-    exchanges = _build_exchanges(cb, benchmark, selected)
+    exchanges = _build_exchanges(cb, benchmark, selected, held_out=held_out)
+    if held_out:
+        # _apply_scenario returns the frozen establishment canonicals exactly
+        # when held_out is true (and None otherwise).
+        assert frozen_codebook is not None
+        exchanges.extend(_build_frozen_exchanges(cb, selected, frozen_codebook))
 
     # In sealed mode examples are evaluator-side decoder knowledge: the
     # payload contract pins symbolic_examples to False (and --with-examples
@@ -1435,32 +1701,35 @@ def run_harness(
                     payload = _build_payload(cb, exchange, receiver_state, decoder_mode, examples)
                 result = _invoke(spec["command"], payload, timeout, identity)
                 if sealed:
-                    rows.append(
-                        _row_from_sealed_result(
-                            cb,
-                            identity,
-                            spec,
-                            exchange,
-                            result,
-                            receiver_state=receiver_state,
-                            decoder_mode=decoder_mode,
-                            payload=payload,
-                        )
+                    row = _row_from_sealed_result(
+                        cb,
+                        identity,
+                        spec,
+                        exchange,
+                        result,
+                        receiver_state=receiver_state,
+                        decoder_mode=decoder_mode,
+                        payload=payload,
                     )
                 else:
-                    rows.append(
-                        _row_from_result(
-                            cb,
-                            identity,
-                            spec,
-                            exchange,
-                            result,
-                            receiver_state=receiver_state,
-                            decoder_mode=decoder_mode,
-                            symbolic_examples=examples,
-                            payload=payload,
-                        )
+                    row = _row_from_result(
+                        cb,
+                        identity,
+                        spec,
+                        exchange,
+                        result,
+                        receiver_state=receiver_state,
+                        decoder_mode=decoder_mode,
+                        symbolic_examples=examples,
+                        payload=payload,
                     )
+                if held_out:
+                    # Every held-out row is labeled with its codebook mode:
+                    # True for the oracle SAGE rows (upper bound), False for
+                    # the frozen SAGE rows and the plain variants (no codebook
+                    # mode).  Absent entirely when --held-out is OFF.
+                    row["oracle_codebook"] = exchange["oracle_codebook"]
+                rows.append(row)
     table_rows = _aggregate_rows(rows)
     deltas = _warm_vs_cold_deltas(table_rows)
     markdown = _format_markdown_table(table_rows)
@@ -1488,6 +1757,13 @@ def run_harness(
     }
     if sealed:
         results["evaluation_boundary"] = "sealed"
+    if held_out:
+        sage_ids = {spec["id"] for spec in cb._sage_specs()}
+        results["dataset_split"] = "held_out"
+        results["oracle_codebook"] = {
+            variant_id: ["frozen", "oracle"]
+            for variant_id in sorted(set(selected) & sage_ids)
+        }
     if feedback is not None:
         results["feedback"] = feedback
     return results
@@ -1577,6 +1853,18 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--held-out",
+        action="store_true",
+        help=(
+            "held-out split (issue #22, stage 3; REQUIRES --sealed): evaluate the sealed "
+            "harness against the unseen scripts/heldout_scenario.py fixture with the SAGE "
+            "codebook FROZEN to the establishment material, running every SAGE variant in "
+            "BOTH labeled modes -- oracle_codebook true (upper bound) and false (frozen "
+            "re-encode); rows carry oracle_codebook labels and the artifact gains "
+            "dataset_split/oracle_codebook keys.  Cannot be combined with --record-feedback."
+        ),
+    )
+    parser.add_argument(
         "--variants",
         default=None,
         help="comma-separated variant ids to evaluate (default: all twelve; an empty value is an error)",
@@ -1597,6 +1885,23 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "model evaluation harness: error: --sealed cannot be combined with "
             "--with-examples: example meanings are evaluator-side decoder knowledge",
+            file=sys.stderr,
+        )
+        return 2
+
+    if args.held_out and not args.sealed:
+        print(
+            "model evaluation harness: error: --held-out requires --sealed: the "
+            "frozen-codebook split is a sealed-boundary evaluation",
+            file=sys.stderr,
+        )
+        return 2
+
+    if args.held_out and args.record_feedback:
+        print(
+            "model evaluation harness: error: --held-out cannot be combined with "
+            "--record-feedback: feedback-loop semantics are defined against the standard "
+            "scenario; held-out feedback is a future refinement",
             file=sys.stderr,
         )
         return 2
@@ -1663,6 +1968,7 @@ def main(argv: list[str] | None = None) -> int:
             timeout=args.timeout,
             record_feedback=args.record_feedback,
             sealed=args.sealed,
+            held_out=args.held_out,
         )
     except ValueError as exc:
         print(f"model evaluation harness: error: {exc}", file=sys.stderr)
@@ -1677,9 +1983,10 @@ def main(argv: list[str] | None = None) -> int:
             os.environ["SAGE_DATABASE_URL"] = prior_db_url
 
     boundary = ", sealed boundary: yes" if args.sealed else ""
+    split = ", held-out split: yes" if args.held_out else ""
     print(
         f"Model evaluation harness (issue #16, stage 3) -- decoder mode: {args.decoder_mode}, "
-        f"symbolic examples: {args.with_examples}{boundary}"
+        f"symbolic examples: {args.with_examples}{boundary}{split}"
     )
     print(results["markdown_table"])
     if results["deltas"]:
