@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.5
+
+- Patch release over 0.2.4. Protocol `sage/0.2`, wire version `2`, migration baseline `0001_sage_0_2`, and the 13 normative TCK vectors are unchanged.
+- Ships the Issue #16 semantic-context-compression cycle as four additive stages. Stage 1 adds context-accounting instrumentation (`src/sage_plugin/context_accounting.py`): per-exchange transport bytes, model-facing token estimates, codebook/pattern setup cost, decoding/expansion cost, and reference-fetch volume recorded through the real `codec.py` encode/decode paths. Default-off (`SAGE_CONTEXT_ACCOUNTING_ENABLED`, default `false`), additive, and wire byte-identical — existing TCK vectors remain byte-identical.
+- Stage 2 adds a deterministic multi-turn semantic-context compression benchmark (`scripts/compression_benchmark.py`): twelve RFC "Phoenix" context-compression variants (1–8 plain serialization/string strategies; 9–12 the real `SageCodec`: codebooks only, codebooks + learned patterns, references + state deltas, full SAGE with ACKed receiver knowledge) over a fixed six-turn conversation, separating transport, model-visible, and semantic compression into efficiency, task, fidelity, and amortization tables. Fully deterministic: no RNG, no wall-clock output, a fixed timestamp, pinned packet ids, and an isolated scratch database per variant. Honest headline: the codebook variant (v09) carries the conversation in 1,172 wire bytes vs 2,027 for the full-context baseline (v01) — about 42% less wire — with full semantic fidelity (task success 1.0) and a break-even of 5 uses; v10 (learned patterns) breaks even at 9; the reference/delta (v11) and ACKed-knowledge (v12) variants do not break even within this short fixture.
+- Stage 3 adds a model-evaluation harness (`scripts/model_eval_harness.py`) measuring the same variants' downstream task success on real model runtimes through configured external adapters — cold vs warm receivers, at least two distinct model families, decoder-assisted token accounting, and the RFC's six-column public result table. It requires an `--adapters` config and `SAGE_BENCH_LLM_PROVIDER`; with neither it prints `not run, no provider` and exits 0 — provider numbers are never fabricated.
+- Stage 4 closes the RFC's feedback loop: the harness's `--record-feedback` flag (default off, so deterministic output is unchanged) records each SAGE variant's measured downstream task success into the codec's pattern store via `PatternStore.record_feedback` (`runtime.feedback` semantics) as an additive `feedback` JSON summary key, with zero wire-byte change. Adds benchmark documentation (README and docs-site Benchmark page).
+- Updates documentation, release artifacts, and verification status for v0.2.5.
+
 ## 0.2.4
 
 - Patch release over 0.2.3. Protocol `sage/0.2`, wire version `2`, migration baseline `0001_sage_0_2`, and the 13 normative TCK vectors are unchanged.

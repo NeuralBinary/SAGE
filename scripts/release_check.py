@@ -6,7 +6,7 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.2.4"
+EXPECTED_VERSION = "0.2.5"
 EXPECTED_RELEASE = "v0.2"
 EXPECTED_PROTOCOL = "sage/0.2"
 EXPECTED_WIRE = 2

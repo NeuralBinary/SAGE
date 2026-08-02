@@ -38,6 +38,7 @@ nav:
   - Quickstart: Quickstart.md
   - Configuration: Configuration.md
   - Architecture: Architecture.md
+  - Benchmark: Benchmark.md
   - Protocol: Protocol.md
   - CLI Tools: CLI-Tools.md
   - Adapters: Adapters.md

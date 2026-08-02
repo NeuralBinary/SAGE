@@ -2,7 +2,7 @@
   "id": "sage",
   "name": "SAGE Semantic Bus",
   "description": "Vendor-neutral semantic handoffs, refs, deltas, and automatic cross-agent context injection.",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "activation": {
     "onStartup": true
   },
