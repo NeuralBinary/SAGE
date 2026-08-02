@@ -11,9 +11,17 @@ Covers (issue #22, stage 2):
   v11 state variants are reference/delta packets (refs + ``meta.state`` on
   the reference turn, chained ``base`` + ``delta`` ops afterwards); v12
   ACKed packets are full semantic packets whose atoms carry code/cv/literal
-  and whose ``meta.receiver_known_code_count`` grows after the ACK; v10's
-  learned-pattern identifier lands in an ATOM (a ``cv > 1`` code whose
-  binding is the EXPANDED pattern canonical), never in ``meta``;
+  and whose ACKed receiver knowledge grows after turn 0 (a PACKET-level
+  fact -- the rendering's meta strips non-wire keys, so the growth is
+  verified at the codec level); v10's learned-pattern identifier lands in
+  an ATOM (a ``cv > 1`` code whose binding is the EXPANDED pattern
+  canonical), never in ``meta``;
+* wire-meta whitelist: the rendering's ``meta`` carries ONLY the wire
+  codec's export keys ``{state, revision, budget_exceeded, memory_tier}``
+  -- ``strategy`` / ``codebook_fingerprint`` / ``receiver_known_code_count``
+  are ABSENT, so the rendering equals the real wire packet plus the
+  ``bindings`` legend (no evaluator-side decoder metadata crosses the
+  sealed boundary);
 * NO stage-1 proxy shape: sealed direct-symbolic SAGE packets never carry
   ``strategy_note`` / ``canonicals``;
 * wire-byte honesty: ``_render_sage_variant_packets`` reproduces the
@@ -69,6 +77,11 @@ LEAK_KEYS = ("content", "expected", "change_markers", "receiver_prior", "example
 
 #: The stage-1 proxy shape that stage-2 rendering must NOT contain.
 PROXY_KEYS = ("strategy_note", "canonicals")
+
+#: The ONLY packet ``meta`` keys the wire codec exports (mirror of the
+#: whitelist in ``WireCodec.compact``, src/sage_plugin/wire_codec.py) -- the
+#: rendering's ``meta`` must be exactly this subset.
+WIRE_META_KEYS = frozenset({"state", "revision", "budget_exceeded", "memory_tier"})
 
 #: Sealed fake adapter: replies with a fixed task_response plus the required
 #: token/cost numbers (the sealed contract's reply shape).
@@ -244,6 +257,63 @@ def _replay_rendering_roundtrip(cb: Any, h: Any, spec: dict[str, Any]) -> dict[i
     return per_turn
 
 
+def _acked_receiver_known_counts(cb: Any, h: Any, spec: dict[str, Any]) -> dict[int, int]:
+    """Replay an ACKed variant through the REAL codec, returning each turn's
+    RAW packet ``meta.receiver_known_code_count``.
+
+    The wire codec strips this key from its export and the rendering's meta
+    is filtered to exactly the wire whitelist, so the ACK-growth is only
+    observable at the PACKET level.  Mirrors the benchmark's per-variant
+    session (schema reset, spec settings, codebook registration, pinned ids,
+    per-turn encode + ACKed decode).
+    """
+    from sage_plugin import db as db_module
+    from sage_plugin.codec import SageCodec
+    from sage_plugin.config import Settings
+    from sage_plugin.db import SessionLocal
+
+    db_module.init_db()
+    cb._reset_schema(db_module)
+    settings = Settings(
+        auth_required=False,
+        database_url=os.environ.get("SAGE_DATABASE_URL", "sqlite://"),
+        context_accounting_enabled=True,
+        learning_mode="managed",
+        **spec.get("settings", {}),
+    )
+    counts: dict[int, int] = {}
+    base_id: str | None = None
+    with SessionLocal() as db:
+        codec = SageCodec(db, settings)
+        for canonical in spec["codebook"]:
+            codec.codebook.register("global", canonical)
+        db.commit()
+        for turn in range(6):
+            cb._pin_packet_id(codec, spec["id"], turn)
+            content = spec["content_fn"](turn)
+            base_state = base_id if (turn > 0 and spec.get("chain_states")) else None
+            inline_limit = spec.get("inline_limit") if turn == 0 else None
+            encoded = codec.encode(
+                cb._sage_request(
+                    content,
+                    use_receiver_knowledge=spec.get("ack", False),
+                    use_patterns=spec.get("patterns", True),
+                    base_state=base_state,
+                    inline_limit=inline_limit,
+                )
+            )
+            counts[turn] = int(encoded.packet.meta.get("receiver_known_code_count", 0))
+            codec.decode(
+                encoded.packet,
+                resolve_refs=spec.get("resolve_refs", False),
+                receiver="bob",
+                acknowledge=spec.get("ack", False),
+            )
+            if spec.get("chain_states") and encoded.packet.meta.get("state"):
+                base_id = str(encoded.packet.meta["state"])
+    return counts
+
+
 def _sealed_adapters_config(command_tail: str = FAKE_ADAPTER_SEALED) -> dict[str, Any]:
     return {
         "acme-gpt-4o": {
@@ -300,7 +370,11 @@ def test_real_packet_structure_v09(cb, h):
     # spot-check the legend against the codebook's canonicals
     assert bindings["C00000001:1"] == "12"
     assert bindings["C00000002:1"] == "database_migrations_must_be_reviewed_by_the_platform_team"
-    assert rendered["meta"]["strategy"] == "semantic"
+    # the strategy is a codec-level fact, NOT part of the wire meta: the
+    # rendering's meta is filtered to the wire whitelist (see
+    # test_rendered_meta_is_wire_whitelist_only)
+    assert entries[0]["strategy"] == "semantic"
+    assert set(rendered["meta"]) <= WIRE_META_KEYS
     # the reconstruction is the recorded benchmark reconstruction (honesty)
     recorded = _recorded_turns(cb)["v09"]
     assert entries[0]["reconstruction"] == recorded[0]["reconstruction"]
@@ -313,7 +387,7 @@ def test_real_packet_structure_v11_state_reference_and_delta(cb, h):
     assert t0["refs"], "v11 turn 0 is a reference packet"
     assert all(str(ref).startswith("sage:sha256:") for ref in t0["refs"])
     assert t0["meta"]["state"]
-    assert t0["meta"]["strategy"] == "reference"
+    assert entries[0]["strategy"] == "reference"
     assert t0["atoms"] == []
     assert t0["bindings"] == {}
     # delta packets: chained base + delta ops, state revision grows
@@ -322,7 +396,7 @@ def test_real_packet_structure_v11_state_reference_and_delta(cb, h):
     assert t1["delta"] and all("op" in op and "path" in op for op in t1["delta"])
     assert t1["meta"]["state"] and t1["meta"]["state"] != t0["meta"]["state"]
     assert t1["meta"]["revision"] == 2
-    assert t1["meta"]["strategy"] == "delta"
+    assert entries[1]["strategy"] == "delta"
     assert t1["refs"] == []
     assert t1["atoms"] == []
     # every turn still carries the full packet identity fields
@@ -339,13 +413,17 @@ def test_real_packet_structure_v12_acked(cb, h):
     assert atoms
     for atom in atoms:
         assert atom["code"] and "cv" in atom and "literal" in atom
-    assert t0["meta"]["strategy"] == "semantic"
+    assert entries[0]["strategy"] == "semantic"
     assert t0["meta"]["state"]
     assert t0["refs"] == []
-    # ACKed receiver knowledge grows after turn 0
-    assert t0["meta"]["receiver_known_code_count"] == 0
+    # ACKed receiver knowledge grows after turn 0 -- a PACKET-level fact the
+    # rendering cannot carry (the wire codec strips the key from its export
+    # and the rendering's meta is filtered to exactly that whitelist), so the
+    # growth is verified at the codec level
+    counts = _acked_receiver_known_counts(cb, h, h._sage_variant_spec(cb, "v12"))
+    assert counts[0] == 0
+    assert counts[1] > counts[0]
     t1 = json.loads(entries[1]["rendering"])
-    assert t1["meta"]["receiver_known_code_count"] > t0["meta"]["receiver_known_code_count"]
     assert t1["meta"]["revision"] == 2
     # bindings legend covers every atom
     for turn in (0, 1):
@@ -367,13 +445,34 @@ def test_real_packet_structure_v10_pattern_identifier_in_atoms(cb, h):
         binding = t0["bindings"][f"{atom['code']}:{atom['cv']}"]
         assert isinstance(binding, str) and binding
         assert " + " in binding, "pattern binding must be the expanded multi-clause canonical"
-    # ... and NOT in meta (meta carries only accounting/strategy fields)
-    assert set(t0["meta"]) == {"codebook_fingerprint", "receiver_known_code_count", "strategy"}
+    # ... and NOT in meta (the rendering's meta is filtered to the wire
+    # whitelist; v10's packets carry no wire-meta fields at all)
+    assert t0["meta"] == {}
+    assert set(t0["meta"]) <= WIRE_META_KEYS
     # later turns reference ordinary canonicals
     t1 = json.loads(entries[1]["rendering"])
     for atom in t1["atoms"]:
         assert atom["cv"] == 1
         assert t1["bindings"][f"{atom['code']}:{atom['cv']}"]
+
+
+# ---------------------------------------------------------------------------
+# Wire-meta whitelist (issue #22 stage-2 hardening): the rendering's meta
+# must carry ONLY the keys the wire codec exports, so the rendering equals
+# the real wire packet plus the bindings legend.
+# ---------------------------------------------------------------------------
+
+
+def test_rendered_meta_is_wire_whitelist_only(cb, h):
+    for vid in SAGE_VARIANTS:
+        entries = h._render_sage_variant_packets(cb, h._sage_variant_spec(cb, vid))
+        for turn in range(6):
+            packet = json.loads(entries[turn]["rendering"])
+            meta = packet["meta"]
+            non_wire = set(meta) - WIRE_META_KEYS
+            assert set(meta) <= WIRE_META_KEYS, f"{vid} turn {turn}: meta carries non-wire keys {sorted(non_wire)}"
+            for banned in ("codebook_fingerprint", "strategy", "receiver_known_code_count"):
+                assert banned not in meta, f"{vid} turn {turn}: meta carries {banned!r}"
 
 
 # ---------------------------------------------------------------------------

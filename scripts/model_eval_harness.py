@@ -106,13 +106,31 @@ the benchmark's recorded ``wire_bytes`` for the same ``(variant, turn)``
 (honesty gate), and the rendering round-trips: parsed back with
 ``Packet.model_validate`` and decoded by the real codec it yields the
 benchmark's recorded reconstruction.  The rendering carries the packet
-fields (atom codes/cv + literals, refs, base, delta ops, meta incl. the
-strategy, prov) plus a ``bindings`` legend mapping each atom's ``code:cv``
-to its canonical clause (learned-pattern atoms map to the pattern's expanded
-canonical), so a model can answer from codes + bindings while the FULL
-codebook/pattern store stays evaluator-side.  Non-sealed mode and sealed
-non-direct-symbolic modes keep the stage-1 representation/reconstruction
-selection byte-identical.
+fields (atom codes/cv + literals, refs, base, delta ops, prov, and meta
+FILTERED to the wire whitelist {state, revision, budget_exceeded,
+memory_tier} -- the exact subset the wire codec exports, so the rendering
+equals the real wire packet + the bindings legend; evaluator-side meta
+fields like the strategy/codebook fingerprint/receiver knowledge never
+leave the evaluator) plus a ``bindings`` legend mapping each atom's
+``code:cv`` to its canonical clause (learned-pattern atoms map to the
+pattern's expanded canonical), so a model can answer from codes + bindings
+while the FULL codebook/pattern store stays evaluator-side.  Non-sealed
+mode and sealed non-direct-symbolic modes keep the stage-1
+representation/reconstruction selection byte-identical.
+
+Sealed direct-symbolic RECONSTRUCTION-FIDELITY scope (stage-2 hardening):
+in sealed direct-symbolic mode the CHAINED/REFERENCE variants are a
+reconstruction-fidelity signal, not a self-contained task payload.  v11's
+rendering is ``base`` (a ``sage:sha256:`` state hash) + ``delta`` ops only
+-- the base state content lives evaluator-side behind the hash -- and v10
+turn 0's single pattern atom covers 1 of 5 clauses, so a COLD sealed
+receiver cannot resolve the base-state/reference content: a perfect echo
+of the packet is structurally bounded (e.g. ~0.70/0.15 task_success on
+v11 turns 1-2) until the stage-4 lifecycle-primed receiver anchors
+base-state resolution.  This is the real SAGE cold-receiver behavior --
+NOT a rendering defect (the rendering is faithful to the codec packet and
+round-trips) -- and sealed v11 / v10-turn-0 scores must be read as
+reconstruction-fidelity signals until stage 4.
 
 RFC field mapping (per result row)
 ----------------------------------
@@ -423,27 +441,51 @@ def _sage_packet(spec: dict[str, Any], turn: int, content: Any, strategy_note: s
 # canonical rendering of the REAL codec packet for the (variant, turn).
 # ---------------------------------------------------------------------------
 
+#: The ONLY packet ``meta`` keys the wire codec exports (mirror of the
+#: whitelist in ``WireCodec.compact``, src/sage_plugin/wire_codec.py).  The
+#: rendering filters ``meta`` to exactly this set so it equals the real wire
+#: packet plus the ``bindings`` legend -- evaluator-side meta fields
+#: (``strategy``, ``codebook_fingerprint``, ``receiver_known_code_count``)
+#: never leave the evaluator.
+_WIRE_META_KEYS: frozenset[str] = frozenset(
+    {"state", "revision", "budget_exceeded", "memory_tier"}
+)
+
 
 def _render_packet_json(codec: Any, packet: Any) -> str:
     """Canonical compact JSON of a real codec packet plus a ``bindings`` legend.
 
     The packet fields (``v``/``id``/``cb``/``sender``/``receiver``/``act``,
     ``atoms`` with code/cv + literals, ``refs``, ``base``, ``delta``,
-    ``prov``, ``meta`` incl. the strategy) are serialized exactly as the
-    codec produced them (``model_dump``, ``exclude_none`` for compactness).
-    ``bindings`` maps every atom's ``code:cv`` to its canonical clause via
-    the codebook's lookup-by-code API (``Codebook.get_by_code`` -- the
-    authoritative code -> concept index; concept ids follow the registration
-    order of ``spec[\"codebook\"]`` in the freshly reset schema, so the
-    mapping is deterministic).  An atom that references a learned pattern
-    (``PatternStore.by_concept_id``) maps to the pattern's EXPANDED canonical
-    -- exactly what the decoder renders for that atom -- so the rendering is
-    self-contained: a model can answer from codes + bindings while the full
-    codebook/pattern store stays evaluator-side.  ``Packet.model_validate``
-    of the result ignores the extra ``bindings`` key, so the rendering
-    round-trips through the real codec unchanged.
+    ``prov``, and ``meta`` filtered to the wire whitelist
+    {``state``, ``revision``, ``budget_exceeded``, ``memory_tier``} -- the
+    exact subset ``WireCodec.compact`` exports, so the serialized ``meta``
+    equals the real wire packet's) are serialized exactly as the codec
+    produced them (``model_dump``, ``exclude_none`` for compactness).
+    Evaluator-side meta fields (``strategy``, ``codebook_fingerprint``,
+    ``receiver_known_code_count``) are deliberately NOT serialized: a real
+    wire packet never carries them.  ``bindings`` maps every atom's
+    ``code:cv`` to its canonical clause via the codebook's lookup-by-code API
+    (``Codebook.get_by_code`` -- the authoritative code -> concept index;
+    concept ids follow the registration order of ``spec[\"codebook\"]`` in the
+    freshly reset schema, so the mapping is deterministic).  An atom that
+    references a learned pattern (``PatternStore.by_concept_id``) maps to the
+    pattern's EXPANDED canonical -- exactly what the decoder renders for that
+    atom -- so the rendering is self-contained: a model can answer from codes
+    + bindings while the full codebook/pattern store stays evaluator-side.
+    An unresolvable code maps to ``null`` in the legend -- DEFENSIVE ONLY:
+    for the sealed variants (v09-v12) every atom's code is registered in the
+    freshly reset schema, so the fallback is unreachable (a miss would
+    indicate a codec/schema bug, not a legitimate rendering shape).
+    ``Packet.model_validate`` of the result ignores the extra ``bindings``
+    key, so the rendering round-trips through the real codec unchanged.
     """
     data = packet.model_dump(mode="json", exclude_none=True)
+    # Meta is filtered to the wire whitelist (see ``_WIRE_META_KEYS``) so the
+    # rendering carries exactly what a real wire packet carries -- no
+    # evaluator-side decoder metadata (strategy / codebook fingerprint /
+    # receiver knowledge) leaks through the sealed boundary.
+    data["meta"] = {k: v for k, v in data["meta"].items() if k in _WIRE_META_KEYS}
     bindings: dict[str, Any] = {}
     for atom in packet.atoms:
         if not atom.code or atom.cv is None:
@@ -554,7 +596,12 @@ def _render_sage_variant_packets(cb: Any, variant_spec: dict[str, Any]) -> dict[
 #: Deterministic re-encode cache: the rendering for a (variant, turn) is fully
 #: determined by the variant spec and the freshly reset schema, so re-encodes
 #: are cached per key (the wire-bytes honesty gate in the tests proves the
-#: cached rendering corresponds to the benchmark's recorded packet).
+#: cached rendering corresponds to the benchmark's recorded packet).  NOTE:
+#: the cache is PER-PROCESS and benchmark-fixed -- the harness always renders
+#: against the same ``cb`` module whose ``_sage_specs()`` are module-constant,
+#: so (variant id, turn) fully identifies the spec.  If this were ever reused
+#: with a different benchmark module sharing variant ids, the key would need
+#: the spec identity (or a spec fingerprint).
 _PACKET_RENDER_CACHE: dict[tuple[str, int], str] = {}
 
 
