@@ -65,6 +65,32 @@ packet rendering for SAGE variants), ``wire_bytes``, ``model_facing_text``
 sender conveyed), ``expected`` (the per-turn ground-truth answer key) and
 ``change_markers``.
 
+Sealed mode (issue #22, stage 1 -- ``--sealed``, default OFF)
+-------------------------------------------------------------
+With ``--sealed`` the adapter boundary is SPLIT: the payload carries ONLY the
+identity fields (``protocol``, ``benchmark``, ``variant``, ``variant_name``,
+``turn``, ``phase``, ``receiver_state``, ``decoder_configuration``,
+``wire_bytes``, ``symbolic_examples`` -- always ``false`` in sealed mode) plus
+``task`` (a deterministic per-variant instruction: the state variants
+v05/v06/v11/v12 ask for the current state --
+``deployment_allowed``/``failed_tests``/``migration_approved``/``blocker`` --
+plus what changed; the text variants ask for a summary of the latest update
+plus what changed), ``model_facing_packet`` (the same selection as the
+unsealed ``model_facing_text``) and ``allowed_decoder_metadata``
+(``codebook_version`` from the adapter config or ``global:1``,
+``receiver_state``, ``decoder_configuration``).  NEVER sent: ``content``,
+``expected``, ``change_markers``, ``receiver_prior``, ``examples`` or any raw
+source text -- the model runner cannot see evaluator-only knowledge.  The
+adapter replies with a ``task_response`` text plus tokens/cost;
+``task_success`` and ``critical_fact_recall`` are scored DETERMINISTICALLY by
+the harness from that text (``cb.read_state`` + ``cb.evaluate_turn`` per-turn
+ratios + ``cb.fidelity_critical``) -- adapter-reported scores are ignored in
+sealed mode.  ``--sealed`` cannot be combined with ``--with-examples``
+(example meanings are evaluator-side decoder knowledge).  Sealed artifacts
+carry a top-level ``evaluation_boundary: "sealed"`` and per-row
+``sealed: true`` + ``task_response``; default OFF keeps every artifact
+byte-identical to the stage-3/4 shape.
+
 RFC field mapping (per result row)
 ----------------------------------
 * receiver model        -> ``receiver_model`` (the config identity)
@@ -431,6 +457,67 @@ def _build_payload(
     return payload
 
 
+def _build_sealed_payload(
+    cb: Any,
+    exchange: dict[str, Any],
+    receiver_state: str,
+    decoder_mode: str,
+    spec: dict[str, Any],
+) -> dict[str, Any]:
+    """The per-exchange JSON payload for SEALED mode (issue #22, stage 1).
+
+    The model runner receives ONLY the identity fields plus ``task``,
+    ``model_facing_packet`` and ``allowed_decoder_metadata`` -- NEVER
+    uncompressed source content (``content``), answer keys (``expected``),
+    ``change_markers``, ``receiver_prior`` or symbolic ``examples`` (the
+    exact key set is pinned by the sealed-payload shape test).  ``task`` is
+    deterministic per exchange: state variants (v05/v06/v11/v12) ask for the
+    current state (``deployment_allowed``/``failed_tests``/
+    ``migration_approved``/``blocker``) plus what changed; text variants ask
+    for a summary of the latest update plus what changed.
+    ``model_facing_packet`` uses the same selection as the unsealed
+    ``model_facing_text`` (representation for sage+direct-symbolic, else the
+    stage-2 reconstruction).  ``allowed_decoder_metadata`` carries the
+    decoder-side knowledge the runner may legitimately use: the config's
+    ``codebook_version`` (or ``global:1``), the receiver state and the
+    decoder configuration.
+    """
+    if exchange["sage"] and decoder_mode == "direct-symbolic":
+        model_facing = exchange["representation"]
+    else:
+        model_facing = exchange["reconstruction"]
+    if exchange["variant"] in _STATE_VARIANTS:
+        task = (
+            "Report the current receiver state: deployment_allowed, "
+            "failed_tests, migration_approved, blocker -- and what changed "
+            "since the previous update."
+        )
+    else:
+        task = (
+            "Summarize the latest update you received and state what changed "
+            "since the previous update."
+        )
+    return {
+        "protocol": "sage/0.2",
+        "benchmark": "compression_benchmark:phoenix_rfc",
+        "variant": exchange["variant"],
+        "variant_name": exchange["variant_name"],
+        "turn": exchange["turn"],
+        "phase": exchange["phase"],
+        "receiver_state": receiver_state,
+        "decoder_configuration": DECODER_LABELS[decoder_mode],
+        "wire_bytes": exchange["wire_bytes"],
+        "symbolic_examples": False,
+        "task": task,
+        "model_facing_packet": model_facing,
+        "allowed_decoder_metadata": {
+            "codebook_version": spec.get("codebook_version", DEFAULT_CODEBOOK_VERSION),
+            "receiver_state": receiver_state,
+            "decoder_configuration": DECODER_LABELS[decoder_mode],
+        },
+    }
+
+
 def _critical_fact_recall(
     cb: Any, result: dict[str, Any], exchange: dict[str, Any], identity: str
 ) -> float:
@@ -561,6 +648,144 @@ def _row_from_result(
         "semantic_loss": _finite_float(result.get("semantic_loss", 0.0), identity, "semantic_loss"),
         "task_success": _finite_float(success, identity, "task_success", minimum=0.0, maximum=1.0),
         "critical_fact_recall": _critical_fact_recall(cb, result, exchange, identity),
+        "latency_ms": _finite_float(result.get("latency_ms", 0.0), identity, "latency_ms", minimum=0.0),
+    }
+
+
+def _score_sealed_response(
+    cb: Any, exchange: dict[str, Any], task_response: Any, identity: str
+) -> tuple[float, float]:
+    """Deterministic harness-side scoring of the adapter's sealed answer.
+
+    In sealed mode the adapter reports NO score: ``task_success`` and
+    ``critical_fact_recall`` are computed by the harness from the adapter's
+    ``task_response`` text alone (the model boundary never sees the answer
+    key).  The per-turn ratios come from ``cb.evaluate_turn`` semantics --
+    qa fields including the CHANGE_MARKERS ``what_changed`` question,
+    state fields, action -- and ``critical_fact_recall`` is
+    ``cb.fidelity_critical`` on the text.  A non-empty-string ``task_response``
+    is required (adapter-naming RuntimeError otherwise -- never fabricated).
+
+    Turn 0 (the shared-context exchange) has no change markers, so it is
+    scored with the same qa computation and ``what_changed: False`` -- a
+    deterministic miss against the ground-truth key, never a fabricated
+    pass.
+    """
+    if not isinstance(task_response, str) or not task_response.strip():
+        raise RuntimeError(
+            f"adapter {identity}: sealed task_response must be a non-empty string"
+        )
+    turn_index = exchange["turn"]
+    predicted = cb.read_state(task_response)
+    if turn_index in cb.CHANGE_MARKERS:
+        per_turn = cb.evaluate_turn(predicted, task_response, turn_index)
+    else:
+        ground = cb.ground_truth_answers(turn_index)
+        qa = {
+            "is_deployment_allowed": cb._yes_no(predicted["deployment_allowed"]),
+            "blocker": predicted["blocker"],
+            "next_team": cb.next_team(predicted["blocker"]),
+            "migration_approved": cb._yes_no(predicted["migration_approved"]),
+            "what_changed": False,
+        }
+        per_turn = {
+            "qa_correct": sum(1 for key in ground["qa"] if qa[key] == ground["qa"][key]),
+            "qa_total": len(ground["qa"]),
+            "state_correct": sum(
+                1 for field in cb._STATE_FIELDS if predicted[field] == ground["state"][field]
+            ),
+            "state_total": len(cb._STATE_FIELDS),
+            "action_correct": int(cb.action_for(qa["next_team"]) == ground["action"]),
+        }
+    task_success = statistics.mean(
+        [
+            per_turn["qa_correct"] / per_turn["qa_total"],
+            per_turn["state_correct"] / per_turn["state_total"],
+            per_turn["action_correct"],
+        ]
+    )
+    critical_fact_recall = float(cb.fidelity_critical(task_response))
+    return task_success, critical_fact_recall
+
+
+def _row_from_sealed_result(
+    cb: Any,
+    identity: str,
+    spec: dict[str, Any],
+    exchange: dict[str, Any],
+    result: dict[str, Any],
+    *,
+    receiver_state: str,
+    decoder_mode: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Sealed-mode result row: harness scores are authoritative.
+
+    Mirrors ``_row_from_result`` (the ``_finite_float``/``_non_negative_int``
+    validators are reused) but the adapter-reported ``task_success`` and
+    ``critical_fact_recall`` are IGNORED -- the row's scores come from
+    ``_score_sealed_response`` on the adapter's ``task_response`` text.
+    Adds ``sealed: True`` and the raw ``task_response``; ``receiver_prior``
+    is deliberately absent (a leak field the sealed payload never carries).
+    """
+    task_response = result.get("task_response")
+    task_success, critical_fact_recall = _score_sealed_response(
+        cb, exchange, task_response, identity
+    )
+    provider_cost = _finite_float(
+        result.get("provider_cost_usd", 0.0), identity, "provider_cost_usd", minimum=0.0
+    )
+    infrastructure_cost = _finite_float(
+        result.get("infrastructure_cost_usd", 0.0), identity, "infrastructure_cost_usd", minimum=0.0
+    )
+    retrieval_cost = _finite_float(
+        result.get("retrieval_cost_usd", 0.0), identity, "retrieval_cost_usd", minimum=0.0
+    )
+    retry_cost = _finite_float(
+        result.get("retry_cost_usd", 0.0), identity, "retry_cost_usd", minimum=0.0
+    )
+    if "cost_usd" in result:
+        total_cost = _finite_float(result["cost_usd"], identity, "cost_usd", minimum=0.0)
+    else:
+        total_cost = provider_cost + infrastructure_cost + retrieval_cost + retry_cost
+    if not math.isfinite(total_cost):
+        raise RuntimeError(f"adapter {identity}: cost_usd must be finite, got {total_cost!r}")
+    adapter_tokens = _non_negative_int(result.get("input_tokens", 0), identity, "input_tokens")
+    expansion_tokens = (
+        cb._estimate_tokens(payload["model_facing_packet"])
+        if decoder_mode == "decoder-assisted"
+        else 0
+    )
+    return {
+        "variant": exchange["variant"],
+        "variant_name": exchange["variant_name"],
+        "turn": exchange["turn"],
+        "phase": exchange["phase"],
+        "receiver_model": identity,
+        "model_family": spec["family"],
+        "model_version": spec["version"],
+        "codebook_version": spec.get("codebook_version", DEFAULT_CODEBOOK_VERSION),
+        "decoder_configuration": DECODER_LABELS[decoder_mode],
+        "symbolic_examples": False,
+        "receiver_state": receiver_state,
+        "sealed": True,
+        "task_response": task_response,
+        "wire_bytes": exchange["wire_bytes"],
+        "adapter_input_tokens": adapter_tokens,
+        "expansion_tokens": expansion_tokens,
+        "input_tokens": adapter_tokens + expansion_tokens,
+        "output_tokens": _non_negative_int(result.get("output_tokens", 0), identity, "output_tokens"),
+        "provider_cost_usd": provider_cost,
+        "infrastructure_cost_usd": infrastructure_cost,
+        "retrieval_cost_usd": retrieval_cost,
+        "retry_cost_usd": retry_cost,
+        "cost_usd": total_cost,
+        "retrievals": _non_negative_int(result.get("retrievals", 0), identity, "retrievals"),
+        "tool_calls": _non_negative_int(result.get("tool_calls", 0), identity, "tool_calls"),
+        "retries": _non_negative_int(result.get("retries", 0), identity, "retries"),
+        "semantic_loss": _finite_float(result.get("semantic_loss", 0.0), identity, "semantic_loss"),
+        "task_success": task_success,
+        "critical_fact_recall": critical_fact_recall,
         "latency_ms": _finite_float(result.get("latency_ms", 0.0), identity, "latency_ms", minimum=0.0),
     }
 
@@ -871,6 +1096,7 @@ def run_harness(
     variants: list[str] | None = None,
     timeout: float = 120.0,
     record_feedback: bool = False,
+    sealed: bool = False,
 ) -> dict[str, Any]:
     """Run the model evaluation harness end-to-end and return the full results.
 
@@ -880,6 +1106,14 @@ def run_harness(
     already imported with an engine bound to a different database than
     ``SAGE_DATABASE_URL``, refuses with ``RuntimeError`` (the module-level
     engine cannot be rebound in this process).
+
+    With ``sealed=True`` (issue #22, stage 1) the adapter boundary is split:
+    payloads are built by ``_build_sealed_payload`` (identity fields + task /
+    model_facing_packet / allowed_decoder_metadata only) and rows by
+    ``_row_from_sealed_result`` (harness-scored; ``symbolic_examples`` is
+    forced False regardless of the parameter).  The results dict gains a
+    top-level ``evaluation_boundary: "sealed"`` key; default OFF keeps every
+    artifact byte-identical to the stage-3/4 shape (no such key).
 
     Raises ``ValueError`` for invalid configuration (including configs with
     fewer than 2 distinct model families) and ``RuntimeError`` for adapter
@@ -907,25 +1141,49 @@ def run_harness(
             raise ValueError(f"unknown variant id {variant_id!r}; expected one of {sorted(known)}")
     exchanges = _build_exchanges(cb, benchmark, selected)
 
+    # In sealed mode examples are evaluator-side decoder knowledge: the
+    # payload contract pins symbolic_examples to False (and --with-examples
+    # is rejected by main()); run_harness forces it here too.
+    examples = False if sealed else bool(symbolic_examples)
+
     rows: list[dict[str, Any]] = []
     for identity, spec in sorted(adapters.items()):
         for receiver_state in ("cold", "warm"):
             for exchange in exchanges:
-                payload = _build_payload(cb, exchange, receiver_state, decoder_mode, symbolic_examples)
-                result = _invoke(spec["command"], payload, timeout, identity)
-                rows.append(
-                    _row_from_result(
-                        cb,
-                        identity,
-                        spec,
-                        exchange,
-                        result,
-                        receiver_state=receiver_state,
-                        decoder_mode=decoder_mode,
-                        symbolic_examples=symbolic_examples,
-                        payload=payload,
+                if sealed:
+                    payload = _build_sealed_payload(
+                        cb, exchange, receiver_state, decoder_mode, spec
                     )
-                )
+                else:
+                    payload = _build_payload(cb, exchange, receiver_state, decoder_mode, examples)
+                result = _invoke(spec["command"], payload, timeout, identity)
+                if sealed:
+                    rows.append(
+                        _row_from_sealed_result(
+                            cb,
+                            identity,
+                            spec,
+                            exchange,
+                            result,
+                            receiver_state=receiver_state,
+                            decoder_mode=decoder_mode,
+                            payload=payload,
+                        )
+                    )
+                else:
+                    rows.append(
+                        _row_from_result(
+                            cb,
+                            identity,
+                            spec,
+                            exchange,
+                            result,
+                            receiver_state=receiver_state,
+                            decoder_mode=decoder_mode,
+                            symbolic_examples=examples,
+                            payload=payload,
+                        )
+                    )
     table_rows = _aggregate_rows(rows)
     deltas = _warm_vs_cold_deltas(table_rows)
     markdown = _format_markdown_table(table_rows)
@@ -938,7 +1196,7 @@ def run_harness(
         "provider": {"configured": True, "env": PROVIDER_ENV},
         "decoder_mode": decoder_mode,
         "decoder_configuration": DECODER_LABELS[decoder_mode],
-        "symbolic_examples": bool(symbolic_examples),
+        "symbolic_examples": examples,
         "adapters": {
             identity: {
                 key: spec[key] for key in ("family", "version", "codebook_version") if key in spec
@@ -951,6 +1209,8 @@ def run_harness(
         "markdown_table": markdown,
         "markdown": markdown_full,
     }
+    if sealed:
+        results["evaluation_boundary"] = "sealed"
     if feedback is not None:
         results["feedback"] = feedback
     return results
@@ -1029,6 +1289,17 @@ def main(argv: list[str] | None = None) -> int:
         help="give the receivers a symbolic-format example packet + meaning (symbolic_examples=true)",
     )
     parser.add_argument(
+        "--sealed",
+        action="store_true",
+        help=(
+            "sealed model boundary (issue #22, stage 1): the adapter receives ONLY identity "
+            "fields + task/model_facing_packet/allowed_decoder_metadata -- never uncompressed "
+            "source content, answer keys, change markers, receiver prior or examples -- and "
+            "reports only a task_response text; task_success/critical_fact_recall are scored "
+            "deterministically by the harness"
+        ),
+    )
+    parser.add_argument(
         "--variants",
         default=None,
         help="comma-separated variant ids to evaluate (default: all twelve; an empty value is an error)",
@@ -1044,6 +1315,14 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
+
+    if args.sealed and args.with_examples:
+        print(
+            "model evaluation harness: error: --sealed cannot be combined with "
+            "--with-examples: example meanings are evaluator-side decoder knowledge",
+            file=sys.stderr,
+        )
+        return 2
 
     if args.adapters is None or not provider_available():
         print(f"model evaluation harness: {NO_PROVIDER_NOTE}")
@@ -1106,6 +1385,7 @@ def main(argv: list[str] | None = None) -> int:
             variants=variants,
             timeout=args.timeout,
             record_feedback=args.record_feedback,
+            sealed=args.sealed,
         )
     except ValueError as exc:
         print(f"model evaluation harness: error: {exc}", file=sys.stderr)
@@ -1119,9 +1399,10 @@ def main(argv: list[str] | None = None) -> int:
         else:
             os.environ["SAGE_DATABASE_URL"] = prior_db_url
 
+    boundary = ", sealed boundary: yes" if args.sealed else ""
     print(
         f"Model evaluation harness (issue #16, stage 3) -- decoder mode: {args.decoder_mode}, "
-        f"symbolic examples: {args.with_examples}"
+        f"symbolic examples: {args.with_examples}{boundary}"
     )
     print(results["markdown_table"])
     if results["deltas"]:
