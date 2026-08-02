@@ -88,10 +88,19 @@ sealed mode.  ``--sealed`` cannot be combined with ``--with-examples``
 (example meanings are evaluator-side decoder knowledge).  Sealed artifacts
 carry a top-level ``evaluation_boundary: "sealed"`` and per-row
 ``sealed: true`` + ``task_response``; default OFF keeps every artifact
-byte-identical to the stage-3/4 shape.  NOTE: in sealed mode warm rows
-currently carry no ``receiver_prior`` (warm == cold behaviorally) -- the
-lifecycle-primed warm receiver is a stage-4 deliverable, not a stage-1
-feature.
+byte-identical to the stage-3/4 shape.  In sealed mode the warm receiver
+is established through the REAL SAGE lifecycle (issue #22, stage 4): for
+each SAGE variant, before its warm exchanges, the shared-context turn
+(``content_fn(0)`` -- ``SHARED_CONTEXT`` or the held-out
+``ESTABLISHMENT_SHARED_CONTEXT``) is encoded with a pinned packet id and
+DECODED with ``acknowledge=True`` (receiver "bob"), which COMMITS receiver
+knowledge (known codes / known refs / current_state) into the knowledge
+store -- verified before any warm turn is rendered -- and the warm
+exchanges then encode with ``use_receiver_knowledge=True``, so the warm
+rows' wire bytes ARE the primed lifecycle measurement.  ``receiver_prior``
+is never sent in sealed mode (a leak field); the priming happens ONCE per
+variant before its warm exchanges (fresh receiver state per variant/run:
+per-process scratch DB + schema reset per variant).
 
 Sealed mode, stage 2 (issue #22 section B mode 1 -- actual packet rendering):
 for SAGE variants (v09-v12) in ``direct-symbolic`` mode the
@@ -118,19 +127,22 @@ while the FULL codebook/pattern store stays evaluator-side.  Non-sealed
 mode and sealed non-direct-symbolic modes keep the stage-1
 representation/reconstruction selection byte-identical.
 
-Sealed direct-symbolic RECONSTRUCTION-FIDELITY scope (stage-2 hardening):
-in sealed direct-symbolic mode the CHAINED/REFERENCE variants are a
-reconstruction-fidelity signal, not a self-contained task payload.  v11's
-rendering is ``base`` (a ``sage:sha256:`` state hash) + ``delta`` ops only
--- the base state content lives evaluator-side behind the hash -- and v10
-turn 0's single pattern atom covers 1 of 5 clauses, so a COLD sealed
-receiver cannot resolve the base-state/reference content: a perfect echo
-of the packet is structurally bounded (e.g. ~0.70/0.15 task_success on
-v11 turns 1-2) until the stage-4 lifecycle-primed receiver anchors
-base-state resolution.  This is the real SAGE cold-receiver behavior --
-NOT a rendering defect (the rendering is faithful to the codec packet and
-round-trips) -- and sealed v11 / v10-turn-0 scores must be read as
-reconstruction-fidelity signals until stage 4.
+Sealed direct-symbolic RECONSTRUCTION-FIDELITY scope (stage-2 hardening,
+stage-4 warm update): in sealed direct-symbolic mode the CHAINED/REFERENCE
+variants are a reconstruction-fidelity signal, not a self-contained task
+payload.  v11's rendering is ``base`` (a ``sage:sha256:`` state hash) +
+``delta`` ops only -- the base state content lives evaluator-side behind
+the hash -- and v10 turn 0's single pattern atom covers 1 of 5 clauses, so
+a COLD sealed receiver cannot resolve the base-state/reference content: a
+perfect echo of the packet is structurally bounded (e.g. ~0.70/0.15
+task_success on v11 turns 1-2).  This is the real SAGE cold-receiver
+behavior -- NOT a rendering defect (the rendering is faithful to the codec
+packet and round-trips) -- and sealed COLD v11 / v10-turn-0 scores must be
+read as reconstruction-fidelity signals.  The stage-4 lifecycle-primed
+WARM rows are the real primed measurement: the warm receiver ACKed the
+establishment through the real lifecycle before the warm exchanges (see
+the stage-4 section above), so warm base-state/reference resolution is
+anchored exactly as the codec's own primed lifecycle provides it.
 
 Held-out mode (issue #22, stage 3 -- unseen conversations, ``--held-out``,
 default OFF)
@@ -140,11 +152,17 @@ evaluates the sealed harness against a HELD-OUT scenario
 (``scripts/heldout_scenario.py``): the codebook/pattern establishment phase
 material is FROZEN before the held-out updates are revealed.  Three phases:
 
-* ESTABLISHMENT -- a NEW project ("Orion": distinct names/facts, so every
-  canonical clause differs from the default Phoenix scenario) is transmitted
-  once as the shared context.  This is the ONLY material the SAGE variants'
-  FROZEN codebook is compiled from (``heldout_scenario.establishment_canonicals``
-  -- the sorted canonical clauses of ``ESTABLISHMENT_SHARED_CONTEXT`` alone).
+* ESTABLISHMENT -- a NEW project ("Orion": distinct names/facts) is
+  transmitted once as the shared context.  This is the ONLY material the
+  SAGE variants' FROZEN codebook is compiled from
+  (``heldout_scenario.establishment_canonicals`` -- the sorted canonical
+  clauses of ``ESTABLISHMENT_SHARED_CONTEXT`` alone).  3 of the 5
+  establishment canonicals differ from the default Phoenix scenario; the
+  other two are shared ('12' -- the bare number split out of "Python
+  3.12." -- and 'database_migrations_must_be_reviewed_by_the_platform_team',
+  the generic migration-review sentence kept verbatim for the fidelity
+  checker); the held-out UPDATE canonicals are fully disjoint from
+  Phoenix.
 * FROZEN CODEBOOK -- the SAGE variants' codebook is pinned to the
   establishment canonicals BEFORE any held-out update is revealed.  The
   held-out updates (>= 8, covering every issue section-C content type:
@@ -166,7 +184,16 @@ SAGE variants run in BOTH explicitly-labeled codebook modes:
   establishment material AND all held-out updates, as ``cb._sage_specs()``
   does): the benchmark-recorded upper bound where the codebook was allowed to
   see everything.  Rows are the standard sealed rows against the patched
-  scenario; their variant_name carries a `` [oracle]`` suffix.
+  scenario; their variant_name carries a `` [oracle]`` suffix.  The
+  "allowed to see everything" narrative is exact for the CODEBOOK variants
+  v09/v10 (their oracle codebook is the full clause set and the frozen one
+  is a pure subset of it).  For v11/v12 it must NOT be read that way:
+  oracle v11's codebook is ``[]`` (references + state deltas) and oracle
+  v12's is the state-field KEYS, so the frozen-vs-oracle delta on v11/v12
+  mixes codebook-kind with frozen-ness (the frozen re-encode gives v11/v12
+  a text-clause codebook their oracle design never had).  The data is
+  honest and deterministic; the labels keep the two modes from being
+  merged.
 * ``oracle_codebook: false`` -- the FROZEN establishment-only codebook:
   spec copies of the oracle SAGE specs with the ``codebook`` field replaced
   by the sorted establishment canonicals, deterministically re-encoded
@@ -189,6 +216,24 @@ defined against the standard scenario; held-out feedback is a future
 refinement.  Default OFF keeps every artifact byte-identical to the
 stage-1/2 sealed shape (no ``dataset_split`` / ``oracle_codebook`` keys, no
 mode suffixes).
+
+Sealed mechanism attribution (issue #22, stage 4 -- default OFF)
+----------------------------------------------------------------
+Every sealed row carries a ``mechanism_used`` field naming the PRIMARY
+compression mechanism of the turn's encode, derived deterministically from
+the real encode (the packet's own strategy + the decision list the encode
+recorded, via the same re-encode machinery that renders the sealed
+packets): ``"state_delta"`` (delta packet with a base), ``"reference"``
+(reference packet with refs), ``"learned_pattern"`` (a pattern atom fired),
+``"codebook"`` (coded atoms; codebook definitions used), ``"capability"``
+(only when the decisions record a receiver-capability negotiation --
+``fallback_negotiated``), ``"literal"`` (all-literal packet, no compression
+mechanism), or ``"none"`` (plain variants, which have no codec lifecycle).
+The artifact gains a top-level ``mechanism_summary`` mapping each variant
+to its per-mechanism counts across that variant's sealed rows.  This is
+ADDITIVE JSON: no existing row field changes beyond the new key, and
+default-OFF artifacts carry neither ``mechanism_used`` nor
+``mechanism_summary``.
 
 RFC field mapping (per result row)
 ----------------------------------
@@ -629,6 +674,7 @@ def _render_sage_variant_packets(cb: Any, variant_spec: dict[str, Any]) -> dict[
             encode_report = codec.context_report()
             if encode_report is None:  # pragma: no cover - accounting is enabled above
                 raise RuntimeError("codec context report unavailable during sealed packet rendering")
+            decisions = _encode_decisions(db, encoded.packet.id)
             decoded = codec.decode(
                 encoded.packet,
                 resolve_refs=variant_spec.get("resolve_refs", False),
@@ -647,6 +693,7 @@ def _render_sage_variant_packets(cb: Any, variant_spec: dict[str, Any]) -> dict[
                 "piece": piece,
                 "strategy": encoded.strategy,
                 "note": f"sage strategy: {encoded.strategy}",
+                "mechanism_used": _mechanism_for_encode(codec, encoded, decisions),
             }
     return results
 
@@ -712,6 +759,362 @@ def _sage_variant_spec(cb: Any, variant_id: str) -> dict[str, Any]:
 #: variant of one held-out run, so the (tag, variant) key identifies the
 #: re-encode.
 _FROZEN_PACKET_RENDER_CACHE: dict[tuple[str, str], dict[int, dict[str, Any]]] = {}
+
+
+#: Lifecycle-primed warm re-encode cache: per (scenario tag, variant,
+#: frozen-flag), the full per-turn rendering dict from
+#: ``_render_warm_variant_packets``.  The warm re-encode primes the receiver
+#: through the REAL SAGE lifecycle (establishment encode -> ACK -> knowledge
+#: commit, verified) ONCE per variant before its warm turns; the
+#: (tag, variant, frozen) key identifies the deterministic re-encode (the
+#: frozen flag matters because the frozen warm re-encode registers the
+#: establishment-only codebook, not the oracle one).
+_WARM_PACKET_RENDER_CACHE: dict[tuple[str, str, bool], dict[int, dict[str, Any]]] = {}
+
+
+# ---------------------------------------------------------------------------
+# Sealed mechanism attribution + lifecycle-primed warm receiver (issue #22,
+# stage 4).  ``mechanism_used`` is derived deterministically from the real
+# encode (packet strategy + the decision list the encode recorded), and the
+# warm receiver is established through the REAL SAGE lifecycle instead of a
+# simulated receiver_prior.
+# ---------------------------------------------------------------------------
+
+
+def _encode_decisions(db: Any, packet_id: str | None) -> list[dict[str, Any]]:
+    """The decision list the real encode recorded for a pinned packet.
+
+    ``codec.encode`` writes a ``MessageAudit`` row (with ``decisions``)
+    before returning, so the authoritative decision list for a re-encoded
+    packet is read back from the freshly reset schema -- exactly the same
+    source ``_record_feedback_for_packets`` uses.
+    """
+    from sqlalchemy import select
+
+    from sage_plugin.db_models import MessageAudit
+
+    if packet_id is None:  # pragma: no cover - encode always assigns the pinned id
+        raise RuntimeError("encoded packet has no id during packet rendering")
+    audit = db.scalar(select(MessageAudit).where(MessageAudit.packet_id == packet_id))
+    if audit is None:  # pragma: no cover - encode always writes the audit row
+        raise RuntimeError(f"no MessageAudit row for packet {packet_id!r} during packet rendering")
+    return list(audit.decisions or [])
+
+
+def _mechanism_for_encode(codec: Any, encoded: Any, decisions: list[dict[str, Any]]) -> str:
+    """The PRIMARY compression mechanism of one real encode (deterministic).
+
+    Attribution priority: ``"capability"`` when the decisions record a
+    receiver-capability negotiation (``fallback_negotiated`` -- the only
+    decision-level signal that capabilities changed the encoding; a
+    capability-shrunk byte budget replaces the budget decision in place, so
+    it is not separately attributable); then the packet's own strategy --
+    ``"state_delta"`` for a delta packet with a base, ``"reference"`` for a
+    reference packet with refs; then the atom content of a semantic packet
+    -- ``"learned_pattern"`` when a pattern atom fired (the atom's concept
+    has an active learned pattern), ``"codebook"`` when coded atoms are
+    present, ``"literal"`` when the packet is all-literal (no compression
+    mechanism); else ``"none"``.  Semantic packets carry atoms and
+    reference/delta packets carry refs/base instead, so the mapping is
+    unambiguous per packet; ``"capability"`` never fires in the benchmark's
+    own runs (no receiver capabilities are configured) but is attributed
+    whenever a negotiation did influence an encode.
+    """
+    if any(decision.get("action") == "fallback_negotiated" for decision in decisions):
+        return "capability"
+    packet = encoded.packet
+    if encoded.strategy == "delta" or (packet.base is not None and packet.delta is not None):
+        return "state_delta"
+    if encoded.strategy == "reference" or packet.refs:
+        return "reference"
+    pattern_fired = False
+    coded = False
+    for atom in packet.atoms:
+        if not atom.code:
+            continue
+        coded = True
+        concept = codec.codebook.get_by_code(atom.code)
+        if concept is not None and codec.patterns.by_concept_id(concept.id) is not None:
+            pattern_fired = True
+    if pattern_fired:
+        return "learned_pattern"
+    if coded:
+        return "codebook"
+    if packet.atoms:
+        return "literal"
+    return "none"
+
+
+def _verify_primed_knowledge(
+    codec: Any, variant_spec: dict[str, Any], content: Any, packet: Any
+) -> None:
+    """HONESTY GATE: the priming decode must have committed receiver knowledge.
+
+    The establishment packet's OWN structure determines what the receiver
+    must have learned from ACKing it: coded atoms -> known codes, refs ->
+    known refs, dict content -> a committed ``current_state`` (the state
+    the packet checkpointed).  If the knowledge store shows none of what
+    the packet carried, priming failed and the warm path RAISES instead of
+    fabricating a warm benefit.  (Reference packets commit ``known_refs``,
+    code packets commit ``known_codes``, and a state packet always commits
+    ``current_state`` -- probed behavior of ``KnowledgeStore.acknowledge``.)
+    """
+    store = codec.knowledge
+    known_codes = store.known_codes("bob", "default")
+    known_refs = store.known_refs("bob", "default")
+    knowledge = store.get("bob", "default")
+    expect_codes = any(atom.code for atom in packet.atoms)
+    expect_refs = bool(packet.refs)
+    problems: list[str] = []
+    if expect_codes and not known_codes:
+        problems.append(
+            "the establishment packet carried coded atoms but the knowledge store "
+            "committed no known codes"
+        )
+    if expect_refs and not known_refs:
+        problems.append(
+            "the establishment packet carried references but the knowledge store "
+            "committed no known refs"
+        )
+    if isinstance(content, dict) and (knowledge is None or knowledge.current_state is None):
+        problems.append(
+            "the establishment packet checkpointed state but no current_state was committed"
+        )
+    if knowledge is None and not expect_codes and not expect_refs:
+        problems.append(
+            "the establishment packet carried neither codes nor refs and no receiver "
+            "knowledge row was created"
+        )
+    if problems:
+        raise RuntimeError(
+            "sealed warm lifecycle priming failed to commit receiver knowledge for variant "
+            f"{variant_spec['id']}: {'; '.join(problems)} -- refusing to fabricate a warm benefit"
+        )
+
+
+def _prime_receiver(codec: Any, cb: Any, variant_spec: dict[str, Any]) -> Any:
+    """Establish the warm receiver through the REAL SAGE lifecycle.
+
+    The shared-context turn (``content_fn(0)`` -- ``SHARED_CONTEXT`` or the
+    held-out ``ESTABLISHMENT_SHARED_CONTEXT``) is encoded with a pinned
+    packet id exactly like turn 0 of the benchmark loop and DECODED with
+    ``acknowledge=True`` (receiver "bob"), which COMMITS receiver knowledge
+    (known codes / known refs / current_state) into the knowledge store.
+    The commit is verified (``_verify_primed_knowledge``) -- a failed
+    priming raises rather than fabricating a warm benefit.  Returns the
+    encoded establishment packet (its structure drives the verification).
+    """
+    cb._pin_packet_id(codec, variant_spec["id"], "prime")
+    prime_content = variant_spec["content_fn"](0)
+    prime_encoded = codec.encode(
+        cb._sage_request(
+            prime_content,
+            use_receiver_knowledge=False,  # establishment precedes any knowledge
+            use_patterns=variant_spec.get("patterns", True),
+            base_state=None,
+            inline_limit=variant_spec.get("inline_limit"),  # turn-0 semantics
+        )
+    )
+    codec.decode(
+        prime_encoded.packet,
+        resolve_refs=variant_spec.get("resolve_refs", False),
+        receiver="bob",
+        acknowledge=True,
+    )
+    _verify_primed_knowledge(codec, variant_spec, prime_content, prime_encoded.packet)
+    return prime_encoded
+
+
+def _render_warm_variant_packets(
+    cb: Any, variant_spec: dict[str, Any], *, frozen: bool = False
+) -> dict[int, dict[str, Any]]:
+    """Re-encode a SAGE variant with a LIFECYCLE-PRIMED warm receiver.
+
+    Mirrors ``_render_sage_variant_packets`` (schema reset, ``Settings``
+    from the spec, codebook registration in order, pinned packet ids, the
+    v10 pattern warm-up) and THEN primes the receiver through the REAL SAGE
+    lifecycle before the per-turn loop: ``_prime_receiver`` encodes the
+    shared-context turn with a pinned packet id and decodes it with
+    ``acknowledge=True``, committing receiver knowledge (verified against
+    the store -- a failed priming raises, never fabricates).  The per-turn
+    loop then encodes with ``use_receiver_knowledge=True`` (the warm path
+    always consumes the primed knowledge; ``acknowledge`` on the decode
+    stays the variant's own flag), so the resulting wire bytes ARE the
+    primed lifecycle measurement.  Deterministic (pinned ids, fixed
+    provenance, content-hashed state ids) and cached per
+    (scenario tag, variant, frozen flag).
+    """
+    key = (_SCENARIO_TAG, variant_spec["id"], frozen)
+    cached = _WARM_PACKET_RENDER_CACHE.get(key)
+    if cached is not None:
+        return cached
+    from sqlalchemy import select
+
+    from sage_plugin import db as db_module
+    from sage_plugin.codec import SageCodec
+    from sage_plugin.config import Settings
+    from sage_plugin.db import SessionLocal
+    from sage_plugin.db_models import LearnedPattern
+
+    db_module.init_db()
+    cb._reset_schema(db_module)
+    settings = Settings(
+        auth_required=False,
+        database_url=os.environ.get("SAGE_DATABASE_URL", "sqlite://"),
+        context_accounting_enabled=True,
+        learning_mode="managed",
+        **variant_spec.get("settings", {}),
+    )
+    results: dict[int, dict[str, Any]] = {}
+    reconstruction = ""
+    with SessionLocal() as db:
+        codec = SageCodec(db, settings)
+        for canonical in variant_spec["codebook"]:
+            codec.codebook.register("global", canonical)
+        db.commit()
+
+        warmup = variant_spec.get("warmup")
+        if warmup is not None:
+            cb._pin_packet_id(codec, variant_spec["id"], "warmup")
+            codec.encode(cb._sage_request(warmup, auto_learn=True, record_learning=True))
+            pattern = db.scalar(select(LearnedPattern))
+            if pattern is not None:
+                codec.patterns.set_status(pattern.pattern_id, "active")
+                db.commit()
+
+        # LIFECYCLE PRIMING: happens ONCE per variant, before its warm
+        # exchanges (the schema was freshly reset above, so the receiver
+        # state is per (variant, run)).
+        _prime_receiver(codec, cb, variant_spec)
+
+        base_id: str | None = None
+        for turn in range(6):
+            cb._pin_packet_id(codec, variant_spec["id"], turn)
+            content = variant_spec["content_fn"](turn)
+            base_state = base_id if (turn > 0 and variant_spec.get("chain_states")) else None
+            inline_limit = variant_spec.get("inline_limit") if turn == 0 else None
+            request = cb._sage_request(
+                content,
+                use_receiver_knowledge=True,  # WARM: consume the primed knowledge
+                use_patterns=variant_spec.get("patterns", True),
+                base_state=base_state,
+                inline_limit=inline_limit,
+            )
+            encoded = codec.encode(request)
+            encode_report = codec.context_report()
+            if encode_report is None:  # pragma: no cover - accounting is enabled above
+                raise RuntimeError("codec context report unavailable during warm packet rendering")
+            decisions = _encode_decisions(db, encoded.packet.id)
+            decoded = codec.decode(
+                encoded.packet,
+                resolve_refs=variant_spec.get("resolve_refs", False),
+                receiver="bob",
+                acknowledge=variant_spec.get("ack", False),
+            )
+            piece = variant_spec["render_fn"](decoded)
+            reconstruction = f"{reconstruction} {piece}".strip()
+            if variant_spec.get("chain_states") and encoded.packet.meta.get("state"):
+                base_id = str(encoded.packet.meta["state"])
+            results[turn] = {
+                "rendering": _render_packet_json(codec, encoded.packet),
+                "wire_bytes_json": encode_report.wire_bytes_json,
+                "wire_bytes_msgpack": encode_report.wire_bytes_msgpack,
+                "reconstruction": reconstruction,
+                "piece": piece,
+                "strategy": encoded.strategy,
+                "note": f"sage strategy: {encoded.strategy}",
+                "mechanism_used": _mechanism_for_encode(codec, encoded, decisions),
+            }
+    _WARM_PACKET_RENDER_CACHE[key] = results
+    return results
+
+
+def _attach_sealed_mechanisms(cb: Any, exchanges: list[dict[str, Any]]) -> None:
+    """Attach the deterministic ``mechanism_used`` to every SEALED cold exchange.
+
+    SAGE mechanisms come from the same deterministic re-encode the sealed
+    payload rendering uses (``_render_sage_variant_packets`` for oracle
+    rows; frozen exchanges already carry their mechanism from
+    ``_build_frozen_exchanges``); plain variants (no codec lifecycle) carry
+    ``"none"``.  Sealed rows only: unsealed rows never read this key.  The
+    re-encode also warms the per-turn rendering cache so the payload loop
+    never re-encodes.
+    """
+    rendered_by_variant: dict[str, dict[int, dict[str, Any]]] = {}
+    for exchange in exchanges:
+        if not exchange["sage"]:
+            exchange["mechanism_used"] = "none"
+            continue
+        if "mechanism_used" in exchange:
+            continue  # frozen exchanges already carry it
+        variant_id = exchange["variant"]
+        rendered = rendered_by_variant.get(variant_id)
+        if rendered is None:
+            rendered = _render_sage_variant_packets(cb, _sage_variant_spec(cb, variant_id))
+            rendered_by_variant[variant_id] = rendered
+            for turn, entry in rendered.items():
+                _PACKET_RENDER_CACHE[(_SCENARIO_TAG, variant_id, turn)] = entry["rendering"]
+        exchange["mechanism_used"] = rendered[exchange["turn"]]["mechanism_used"]
+
+
+def _build_warm_exchanges(
+    cb: Any,
+    cold_exchanges: list[dict[str, Any]],
+    *,
+    frozen_codebook: list[str] | None,
+) -> list[dict[str, Any]]:
+    """SEALED-mode warm exchange records: lifecycle-primed SAGE re-encodes.
+
+    For every cold exchange of a SAGE variant the variant is re-encoded
+    through the REAL codec with a lifecycle-primed warm receiver
+    (``_render_warm_variant_packets``: establishment encode -> ACK ->
+    knowledge commit (verified) -> per-turn encode with
+    ``use_receiver_knowledge=True``) and the warm wire bytes / rendering /
+    reconstruction / mechanism replace the cold ones; plain variants keep
+    their turn data unchanged (their warm row differs only by the
+    ``receiver_state`` label, exactly like stage 3).  The warm wire bytes
+    ARE the primed measurement -- produced by the real primed lifecycle,
+    never copied from the cold rows.
+    """
+    warm: list[dict[str, Any]] = []
+    for exchange in cold_exchanges:
+        entry = dict(exchange)
+        if exchange["sage"]:
+            spec = _sage_variant_spec(cb, exchange["variant"])
+            if exchange.get("frozen"):
+                assert frozen_codebook is not None
+                spec = dict(spec)
+                spec["codebook"] = list(frozen_codebook)
+                rendered = _render_warm_variant_packets(cb, spec, frozen=True)
+            else:
+                rendered = _render_warm_variant_packets(cb, spec)
+            turn_entry = rendered[exchange["turn"]]
+            entry["representation"] = turn_entry["rendering"]
+            entry["wire_bytes"] = turn_entry["wire_bytes_json"]
+            entry["reconstruction"] = turn_entry["reconstruction"]
+            entry["mechanism_used"] = turn_entry["mechanism_used"]
+            entry["primed"] = True
+        else:
+            entry["mechanism_used"] = "none"
+        warm.append(entry)
+    return warm
+
+
+def _mechanism_summary(rows: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    """Per-variant mechanism counts across the variant's sealed rows.
+
+    Additive top-level ``mechanism_summary``: ``{variant_id: {mechanism:
+    count}}`` counting every sealed row of the variant (all receiver
+    states; in held-out mode the oracle and frozen rows of the same variant
+    share the bucket -- the per-row ``mechanism_used`` values stay
+    distinguishable on the rows themselves).
+    """
+    counts: dict[str, dict[str, int]] = {}
+    for row in rows:
+        entry = counts.setdefault(row["variant"], {})
+        mechanism = row.get("mechanism_used", "none")
+        entry[mechanism] = entry.get(mechanism, 0) + 1
+    return counts
 
 
 def _render_frozen_variant_packets(
@@ -872,6 +1275,7 @@ def _build_frozen_exchanges(
                     "sage": True,
                     "frozen": True,
                     "oracle_codebook": False,
+                    "mechanism_used": entry["mechanism_used"],
                 }
             )
     return exchanges
@@ -950,11 +1354,12 @@ def _build_sealed_payload(
     ``global:1``), the receiver state and the decoder configuration.
     """
     if exchange["sage"] and decoder_mode == "direct-symbolic":
-        if exchange.get("frozen"):
-            # FROZEN-codebook mode (held-out, issue #22 stage 3): the model
-            # faces the re-encoded packet for the frozen establishment-only
-            # codebook -- the rendering the frozen exchange already carries
-            # (``_render_frozen_variant_packets`` output).
+        if exchange.get("frozen") or exchange.get("primed"):
+            # FROZEN-codebook mode (held-out, issue #22 stage 3) and
+            # LIFECYCLE-PRIMED WARM exchanges (stage 4) carry the re-encoded
+            # packet they were built from (``_render_frozen_variant_packets``
+            # / ``_render_warm_variant_packets`` output) -- the model faces
+            # that rendering.
             model_facing = exchange["representation"]
         else:
             model_facing = _render_actual_packet(
@@ -1206,8 +1611,11 @@ def _row_from_sealed_result(
     validators are reused) but the adapter-reported ``task_success`` and
     ``critical_fact_recall`` are IGNORED -- the row's scores come from
     ``_score_sealed_response`` on the adapter's ``task_response`` text.
-    Adds ``sealed: True`` and the raw ``task_response``; ``receiver_prior``
-    is deliberately absent (a leak field the sealed payload never carries).
+    Adds ``sealed: True``, the raw ``task_response`` and the exchange's
+    deterministic ``mechanism_used`` (stage 4: every sealed exchange carries
+    it -- ``\"none\"`` only as a defensive fallback for an exchange that
+    somehow lacks the key); ``receiver_prior`` is deliberately absent (a leak
+    field the sealed payload never carries).
     """
     task_response = result.get("task_response")
     task_success, critical_fact_recall = _score_sealed_response(
@@ -1250,6 +1658,7 @@ def _row_from_sealed_result(
         "symbolic_examples": False,
         "receiver_state": receiver_state,
         "sealed": True,
+        "mechanism_used": exchange.get("mechanism_used", "none"),
         "task_response": task_response,
         "wire_bytes": exchange["wire_bytes"],
         "adapter_input_tokens": adapter_tokens,
@@ -1684,6 +2093,22 @@ def run_harness(
         assert frozen_codebook is not None
         exchanges.extend(_build_frozen_exchanges(cb, selected, frozen_codebook))
 
+    # Stage-4 sealed mechanics (ADDITIVE -- issue #22, stage 4): every sealed
+    # COLD exchange carries its deterministic mechanism attribution
+    # (``_attach_sealed_mechanisms``; the render functions already emit
+    # ``mechanism_used`` per turn, the frozen exchanges carry it from
+    # ``_build_frozen_exchanges``), and the sealed WARM exchanges are
+    # lifecycle-primed re-encodes (``_build_warm_exchanges``: establishment
+    # encode -> ACK -> VERIFIED knowledge commit -> per-turn encode with
+    # ``use_receiver_knowledge=True`` -- the real primed lifecycle, never a
+    # fabricated wire delta; see the module docstring's stage-4 section).
+    # Unsealed runs keep the stage-3 shape: the warm loop reuses the cold
+    # exchange list and only the ``receiver_state`` label differs.
+    warm_exchanges: list[dict[str, Any]] | None = None
+    if sealed:
+        _attach_sealed_mechanisms(cb, exchanges)
+        warm_exchanges = _build_warm_exchanges(cb, exchanges, frozen_codebook=frozen_codebook)
+
     # In sealed mode examples are evaluator-side decoder knowledge: the
     # payload contract pins symbolic_examples to False (and --with-examples
     # is rejected by main()); run_harness forces it here too.
@@ -1692,7 +2117,14 @@ def run_harness(
     rows: list[dict[str, Any]] = []
     for identity, spec in sorted(adapters.items()):
         for receiver_state in ("cold", "warm"):
-            for exchange in exchanges:
+            # Sealed warm rows consume the lifecycle-primed warm exchange
+            # list (mirror of the cold loop with receiver_state="warm"); every
+            # other combination reuses the cold exchange list.
+            exchange_list = exchanges
+            if sealed and receiver_state == "warm":
+                assert warm_exchanges is not None  # built above when sealed
+                exchange_list = warm_exchanges
+            for exchange in exchange_list:
                 if sealed:
                     payload = _build_sealed_payload(
                         cb, exchange, receiver_state, decoder_mode, spec
@@ -1757,6 +2189,7 @@ def run_harness(
     }
     if sealed:
         results["evaluation_boundary"] = "sealed"
+        results["mechanism_summary"] = _mechanism_summary(rows)
     if held_out:
         sage_ids = {spec["id"] for spec in cb._sage_specs()}
         results["dataset_split"] = "held_out"

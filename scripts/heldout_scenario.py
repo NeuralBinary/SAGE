@@ -6,8 +6,12 @@ parallel to the RFC Phoenix fixture so the same deterministic scoring machinery
 (``compression_benchmark``'s ``read_state`` / ``evaluate_turn`` /
 ``ground_truth_answers`` / ``fidelity_critical``) applies unchanged.
 
-Phases (mirrors the RFC Phoenix fixture but with distinct names and facts so
-every canonical clause differs from Phoenix):
+Phases (mirrors the RFC Phoenix fixture but with distinct names and facts;
+the compiled establishment canonicals are NOT all distinct from Phoenix --
+2 of the 5 are shared: '12' (the bare number split out of "Python 3.12.")
+and 'database_migrations_must_be_reviewed_by_the_platform_team' (the
+generic migration-review sentence kept verbatim for the fidelity checker);
+the held-out UPDATE canonicals are fully disjoint from Phoenix):
 
 * Phase 1 -- establishment: ``ESTABLISHMENT_SHARED_CONTEXT`` is transmitted
   once.  In held-out mode this is the ONLY material the SAGE variants'
