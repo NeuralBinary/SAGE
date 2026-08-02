@@ -13,7 +13,7 @@ import zipfile
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
-VERSION = "0.2.5"
+VERSION = "0.2.6"
 SOURCE_NAME = f"sage-plugin-v{VERSION}.zip"
 WHEEL_NAME = f"sage_agent_protocol-{VERSION}-py3-none-any.whl"
 HERMES_NAME = f"sage-hermes-plugin-v{VERSION}.zip"

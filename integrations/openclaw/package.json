@@ -1,6 +1,6 @@
 {
   "name": "@sage-agent/openclaw-sage",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "type": "module",
   "files": [
     "dist",

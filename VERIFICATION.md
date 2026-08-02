@@ -9,12 +9,66 @@
 | Repository | https://github.com/NeuralBinary/SAGE |
 | Credits | @NeuralBinary, @ro0ti |
 | Public version | v0.2 |
-| Package version | 0.2.5 |
+| Package version | 0.2.6 |
 | Protocol | sage/0.2 |
 | Wire | 2 |
 | Database baseline | 0001_sage_0_2 |
 
 This report records qualification of the clean v0.2 first-deployment baseline on July 31, 2026. No pre-v0.2 protocol reader, compatibility layer, or migration chain is shipped.
+
+## v0.2.6 patch verification
+
+v0.2.6 is a patch release over the v0.2.5 baseline. Protocol `sage/0.2`, wire
+version `2`, the `0001_sage_0_2` migration baseline, and the 13 normative TCK
+vectors are unchanged.
+
+v0.2.6 ships the Issue #22 sealed unseen-data evaluation cycle as four additive
+stages, each merged to main as its own PR, all default-off with every
+non-sealed artifact byte-identical:
+
+- Stage 1 — sealed model boundary: PR #23 (`2eb2484`) adds an opt-in `--sealed`
+  mode to `scripts/model_eval_harness.py`. The adapter receives only
+  `{task, model_facing_packet, allowed_decoder_metadata}` plus identity fields
+  — never uncompressed source content, answer keys, change markers, receiver
+  prior, or sample meanings. Task success / critical-fact recall are scored
+  deterministically harness-side (the benchmark's `evaluate_turn` /
+  `read_state` / `fidelity_critical` checkers); adapter-reported scores are
+  ignored in sealed mode. `SAGE_*` environment variables are scrubbed from
+  adapter subprocesses (adversary F1: the inherited `SAGE_DATABASE_URL` could
+  otherwise expose the ground-truth scratch database; regression-tested with
+  an env-leak-detecting fake adapter). The sealed mode rejects the optional
+  sample-attachment option (sample meanings are evaluator-side decoder
+  knowledge).
+- Stage 2 — actual packet rendering: PR #24 (`78f2927`) makes sealed
+  `direct-symbolic` SAGE variants face a canonical compact-JSON rendering of
+  the REAL codec packet (atom codes + cv, literals, refs, base, delta ops,
+  prov, meta filtered to the wire whitelist `{state, revision,
+  budget_exceeded, memory_tier}`) plus a `bindings` legend; wire-byte honesty
+  and round-trip gates are tested. Adversary F1 of this stage (non-wire meta
+  keys leaking) fixed in the hardening commit `d215e27` (96/96 → 0/96).
+- Stage 3 — unseen conversations: PR #25 (`f348aa4`) adds `--held-out`
+  (requires `--sealed`) with the Orion fixture (establishment phase + eight
+  held-out updates covering the required content types) and a codebook FROZEN
+  from establishment material only; SAGE variants run in both labeled modes
+  (`oracle_codebook: true` upper bound / `false` frozen measurement).
+- Stage 4 — lifecycle-primed warm receiver: PR #26 (`fc88724`) establishes
+  sealed warm rows through the real lifecycle (encode → decode with
+  acknowledge → verify knowledge committed → `use_receiver_knowledge=True`);
+  the honesty gate refuses to fabricate a warm benefit. Every sealed row
+  carries `mechanism_used`; the artifact gains an additive `mechanism_summary`.
+  Verified finding documented plainly: primed warm wire bytes equal cold on
+  the current fixtures (receiver knowledge is decoder-side), so the measured
+  benefit is the verified lifecycle + mechanism attribution, not a wire saving.
+
+Verification evidence for v0.2.6: the full test suite (236 tests) passes on
+the release tree with the `[dev,mcp,bench,otel]` extras; each stage was
+independently verified from a clean `git archive` (verifier), reviewed
+(reviewer), and adversarially probed (adversary) with findings fixed in
+hardening commits; `scripts/compression_benchmark.py` remained byte-identical
+throughout the cycle (frozen benchmark golden rule); `release_check.py`
+reports `{"ok":true,"version":"0.2.6","tck_vectors":13}`; `package_check.py`
+passes source/wheel/hermes/openclaw; CI is green on the release commit (see
+the check-runs evidence linked in the release notes).
 
 ## v0.2.5 patch verification
 
