@@ -26,7 +26,11 @@ Covers (issue #16, stage 3):
   succeeding, refusal to rebind a pre-imported ``sage_plugin`` engine (no
   drop_all on a pre-bound user DB), ``latency_ms`` validation, bool
   rejection in ``_finite_float``, ``--timeout`` nan/inf rejection, and no
-  empty ``--output`` dir left behind on a missing adapters file.
+  empty ``--output`` dir left behind on a missing adapters file;
+* round-3 hardening regression tests (adversary findings #1..#2): no empty
+  ``--output`` dir left behind on an empty ``--variants`` value with a valid
+  adapters file, and an advisory stderr overwrite warning when the output
+  dir already holds ``model_eval_harness.json``.
 
 All tests are deterministic (fixed inputs, no network, no real model) and
 write their output directories under ``/opt/data/sage/scratch/`` -- never
@@ -755,3 +759,47 @@ def test_missing_adapters_leaves_no_output_dir(h, monkeypatch, scratch_dir, caps
     )
     assert "no such adapters file" in capsys.readouterr().err
     assert not out_dir.exists()
+
+
+# ---------------------------------------------------------------------------
+# Round-3 hardening regression tests (adversary findings #1 and #2)
+# ---------------------------------------------------------------------------
+
+
+def test_empty_variants_leaves_no_output_dir(h, monkeypatch, scratch_dir, capsys):
+    """Adversary finding #1: with a VALID adapters file, an empty --variants
+    value must exit 2 WITHOUT creating the --output dir -- the mkdir happens
+    only after every config path has validated (mirrors
+    test_missing_adapters_leaves_no_output_dir)."""
+    monkeypatch.setenv("SAGE_BENCH_LLM_PROVIDER", "fake")
+    cfg = scratch_dir / "adapters.json"
+    cfg.write_text(json.dumps(_adapters_config()))
+    out_dir = scratch_dir / "must-not-exist"
+    assert (
+        h.main(["--adapters", str(cfg), "--variants", "", "--output", str(out_dir)]) == 2
+    )
+    assert "at least one variant" in capsys.readouterr().err
+    assert not out_dir.exists()
+
+
+def test_existing_artifact_warns_on_stderr(scratch_dir):
+    """Adversary finding #2: when the --output dir already holds a
+    model_eval_harness.json (e.g. a concurrent run pointed at the same dir),
+    the harness still succeeds (exit 0) but prints an advisory overwrite
+    warning on stderr -- no silent last-wins."""
+    cfg = scratch_dir / "adapters.json"
+    cfg.write_text(json.dumps(_adapters_config()))
+    out_dir = scratch_dir / "out"
+    out_dir.mkdir()
+    (out_dir / "model_eval_harness.json").write_text('{"stale": true}\n')
+    fake_home = scratch_dir / "fakehome"
+    fake_home.mkdir()
+    completed = _run_cli_subprocess(
+        ["--adapters", str(cfg), "--output", str(out_dir), "--variants", "v01"],
+        fake_home,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "warning: overwriting existing artifacts" in completed.stderr
+    assert "concurrent runs" in completed.stderr
+    # the run still wrote its own artifacts (the overwrite is intentional)
+    assert (out_dir / "model_eval_harness.json").exists()

@@ -787,6 +787,16 @@ def run_harness(
 def _write_artifacts(out_dir: str | Path, results: dict[str, Any]) -> None:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
+    # Advisory only (no locking -- this is an opt-in benchmark tool): a
+    # pre-existing artifact means a previous run -- possibly a CONCURRENT run
+    # pointed at the same --output dir -- is about to be silently overwritten.
+    if (out / "model_eval_harness.json").exists():
+        print(
+            "model evaluation harness: warning: overwriting existing artifacts "
+            f"in {out} (concurrent runs with the same --output dir silently lose "
+            "one run's results)",
+            file=sys.stderr,
+        )
     try:
         payload = (
             json.dumps(results, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False) + "\n"
@@ -859,8 +869,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # Reject an --output path that exists as a FILE before anything runs (no
     # traceback, no wasted adapter calls).  The directory itself is only
-    # created AFTER the adapters config has loaded successfully, so a missing
-    # adapters file never leaves an empty output dir behind.
+    # created AFTER the adapters config has loaded AND the --variants value
+    # has validated, so no config-error path leaves an empty output dir
+    # behind.
     output_dir: Path | None = None
     if args.output is not None:
         out: Path = args.output
@@ -884,9 +895,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"model evaluation harness: error: {exc}", file=sys.stderr)
         return 2
 
-    if output_dir is not None:
-        output_dir.mkdir(parents=True, exist_ok=True)
-
     variants: list[str] | None = None
     if args.variants is not None:
         segments = [item.strip() for item in args.variants.split(",")]
@@ -897,6 +905,11 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         variants = [item for item in segments if item]
+
+    # Create the output dir only now -- adapters loaded AND --variants
+    # validated -- so no config-error path leaves an empty directory behind.
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
 
     # Bind a STABLE per-process scratch database BEFORE any sage_plugin import
     # (db.py creates the engine at import time).  The file lives in
