@@ -7,7 +7,7 @@ successful run. SAGE runs as a separate service.
 ## Install from the GitHub release
 
 ```bash
-openclaw plugins install npm-pack:./sage-agent-openclaw-sage-0.2.5.tgz
+openclaw plugins install npm-pack:./sage-agent-openclaw-sage-0.2.6.tgz
 openclaw plugins enable sage
 openclaw plugins inspect sage --runtime --json
 ```

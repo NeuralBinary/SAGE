@@ -8,16 +8,16 @@ SAGE itself runs as a separate service.
 Linux/macOS:
 
 ```bash
-unzip sage-hermes-plugin-v0.2.5.zip
-cd sage-hermes-plugin-v0.2.5
+unzip sage-hermes-plugin-v0.2.6.zip
+cd sage-hermes-plugin-v0.2.6
 ./install.sh
 ```
 
 Windows PowerShell:
 
 ```powershell
-Expand-Archive .\sage-hermes-plugin-v0.2.5.zip
-cd .\sage-hermes-plugin-v0.2.5
+Expand-Archive .\sage-hermes-plugin-v0.2.6.zip
+cd .\sage-hermes-plugin-v0.2.6
 .\install.ps1
 ```
 
