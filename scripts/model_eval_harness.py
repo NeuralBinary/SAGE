@@ -75,8 +75,7 @@ identity fields (``protocol``, ``benchmark``, ``variant``, ``variant_name``,
 v05/v06/v11/v12 ask for the current state --
 ``deployment_allowed``/``failed_tests``/``migration_approved``/``blocker`` --
 plus what changed; the text variants ask for a summary of the latest update
-plus what changed), ``model_facing_packet`` (the same selection as the
-unsealed ``model_facing_text``) and ``allowed_decoder_metadata``
+plus what changed), ``model_facing_packet`` and ``allowed_decoder_metadata``
 (``codebook_version`` from the adapter config or ``global:1``,
 ``receiver_state``, ``decoder_configuration``).  NEVER sent: ``content``,
 ``expected``, ``change_markers``, ``receiver_prior``, ``examples`` or any raw
@@ -93,6 +92,45 @@ byte-identical to the stage-3/4 shape.  NOTE: in sealed mode warm rows
 currently carry no ``receiver_prior`` (warm == cold behaviorally) -- the
 lifecycle-primed warm receiver is a stage-4 deliverable, not a stage-1
 feature.
+
+Sealed mode, stage 2 (issue #22 section B mode 1 -- actual packet rendering):
+for SAGE variants (v09-v12) in ``direct-symbolic`` mode the
+``model_facing_packet`` is NO LONGER the stage-1 canonical-clause proxy: it
+is a canonical compact-JSON rendering of the REAL codec packet for that
+``(variant, turn)``, deterministically re-encoded through the codec exactly
+like the stage-2 benchmark (``_render_sage_variant_packets`` mirrors
+``cb._run_sage_variant``: schema reset, spec ``Settings``, codebook
+registration from ``spec["codebook"]`` in order, pinned packet ids, the v10
+pattern warm-up, per-turn encode+decode).  The re-encoded wire bytes equal
+the benchmark's recorded ``wire_bytes`` for the same ``(variant, turn)``
+(honesty gate), and the rendering round-trips: parsed back with
+``Packet.model_validate`` and decoded by the real codec it yields the
+benchmark's recorded reconstruction.  The rendering carries the packet
+fields (atom codes/cv + literals, refs, base, delta ops, prov, and meta
+FILTERED to the wire whitelist {state, revision, budget_exceeded,
+memory_tier} -- the exact subset the wire codec exports, so the rendering
+equals the real wire packet + the bindings legend; evaluator-side meta
+fields like the strategy/codebook fingerprint/receiver knowledge never
+leave the evaluator) plus a ``bindings`` legend mapping each atom's
+``code:cv`` to its canonical clause (learned-pattern atoms map to the
+pattern's expanded canonical), so a model can answer from codes + bindings
+while the FULL codebook/pattern store stays evaluator-side.  Non-sealed
+mode and sealed non-direct-symbolic modes keep the stage-1
+representation/reconstruction selection byte-identical.
+
+Sealed direct-symbolic RECONSTRUCTION-FIDELITY scope (stage-2 hardening):
+in sealed direct-symbolic mode the CHAINED/REFERENCE variants are a
+reconstruction-fidelity signal, not a self-contained task payload.  v11's
+rendering is ``base`` (a ``sage:sha256:`` state hash) + ``delta`` ops only
+-- the base state content lives evaluator-side behind the hash -- and v10
+turn 0's single pattern atom covers 1 of 5 clauses, so a COLD sealed
+receiver cannot resolve the base-state/reference content: a perfect echo
+of the packet is structurally bounded (e.g. ~0.70/0.15 task_success on
+v11 turns 1-2) until the stage-4 lifecycle-primed receiver anchors
+base-state resolution.  This is the real SAGE cold-receiver behavior --
+NOT a rendering defect (the rendering is faithful to the codec packet and
+round-trips) -- and sealed v11 / v10-turn-0 scores must be read as
+reconstruction-fidelity signals until stage 4.
 
 RFC field mapping (per result row)
 ----------------------------------
@@ -219,7 +257,9 @@ DEFAULT_CODEBOOK_VERSION = "global:1"
 #: artifact, so an unbounded reply would let a hostile adapter bloat the
 #: artifact (or exhaust harness memory) at will -- issue #22 adversary
 #: finding F2.  Replies longer than this are rejected with an
-#: adapter-naming RuntimeError before any scoring or persistence.
+#: adapter-naming RuntimeError before any scoring or persistence.  The cap
+#: counts CHARACTERS, not bytes (``len()`` on the ``str``) -- strictly
+#: bounded either way.
 MAX_TASK_RESPONSE_CHARS = 100_000
 
 DECODER_MODES = ("direct-symbolic", "decoder-assisted", "full-expansion")
@@ -336,8 +376,13 @@ def _invoke(command: list[str], payload: dict[str, Any], timeout: float, identit
     processes are hostile in the sealed threat model and must never be able
     to reach the evaluator's ground-truth codec database through an inherited
     ``SAGE_DATABASE_URL`` (or any other ``SAGE_*`` setting) -- issue #22
-    adversary finding F1.  ``HOME``/``PATH`` and all non-SAGE variables pass
-    through unchanged.
+    adversary finding F1.  This is an INTERFACE-LEVEL boundary, not a
+    security boundary against the same user: a same-user process with
+    filesystem access could still read the harness's own source (which
+    embeds the benchmark fixture) or guess the scratch database path
+    (``~/.sage-bench/model_eval_harness-<pid>.db``); the harness adds no
+    channel beyond that ambient reality.  ``HOME``/``PATH`` and all non-SAGE
+    variables pass through unchanged.
     """
     started = time.perf_counter()
     try:
@@ -387,6 +432,207 @@ def _sage_packet(spec: dict[str, Any], turn: int, content: Any, strategy_note: s
         sort_keys=True,
         separators=(",", ":"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Sealed direct-symbolic actual-packet rendering (issue #22, stage 2 -- §B
+# mode 1).  The stage-1 ``_sage_packet`` proxy above stays byte-identical for
+# the UNSEALED path; sealed direct-symbolic SAGE payloads instead carry a
+# canonical rendering of the REAL codec packet for the (variant, turn).
+# ---------------------------------------------------------------------------
+
+#: The ONLY packet ``meta`` keys the wire codec exports (mirror of the
+#: whitelist in ``WireCodec.compact``, src/sage_plugin/wire_codec.py).  The
+#: rendering filters ``meta`` to exactly this set so it equals the real wire
+#: packet plus the ``bindings`` legend -- evaluator-side meta fields
+#: (``strategy``, ``codebook_fingerprint``, ``receiver_known_code_count``)
+#: never leave the evaluator.
+_WIRE_META_KEYS: frozenset[str] = frozenset(
+    {"state", "revision", "budget_exceeded", "memory_tier"}
+)
+
+
+def _render_packet_json(codec: Any, packet: Any) -> str:
+    """Canonical compact JSON of a real codec packet plus a ``bindings`` legend.
+
+    The packet fields (``v``/``id``/``cb``/``sender``/``receiver``/``act``,
+    ``atoms`` with code/cv + literals, ``refs``, ``base``, ``delta``,
+    ``prov``, and ``meta`` filtered to the wire whitelist
+    {``state``, ``revision``, ``budget_exceeded``, ``memory_tier``} -- the
+    exact subset ``WireCodec.compact`` exports, so the serialized ``meta``
+    equals the real wire packet's) are serialized exactly as the codec
+    produced them (``model_dump``, ``exclude_none`` for compactness).
+    Evaluator-side meta fields (``strategy``, ``codebook_fingerprint``,
+    ``receiver_known_code_count``) are deliberately NOT serialized: a real
+    wire packet never carries them.  ``bindings`` maps every atom's
+    ``code:cv`` to its canonical clause via the codebook's lookup-by-code API
+    (``Codebook.get_by_code`` -- the authoritative code -> concept index;
+    concept ids follow the registration order of ``spec[\"codebook\"]`` in the
+    freshly reset schema, so the mapping is deterministic).  An atom that
+    references a learned pattern (``PatternStore.by_concept_id``) maps to the
+    pattern's EXPANDED canonical -- exactly what the decoder renders for that
+    atom -- so the rendering is self-contained: a model can answer from codes
+    + bindings while the full codebook/pattern store stays evaluator-side.
+    An unresolvable code maps to ``null`` in the legend -- DEFENSIVE ONLY:
+    for the sealed variants (v09-v12) every atom's code is registered in the
+    freshly reset schema, so the fallback is unreachable (a miss would
+    indicate a codec/schema bug, not a legitimate rendering shape).
+    ``Packet.model_validate`` of the result ignores the extra ``bindings``
+    key, so the rendering round-trips through the real codec unchanged.
+    """
+    data = packet.model_dump(mode="json", exclude_none=True)
+    # Meta is filtered to the wire whitelist (see ``_WIRE_META_KEYS``) so the
+    # rendering carries exactly what a real wire packet carries -- no
+    # evaluator-side decoder metadata (strategy / codebook fingerprint /
+    # receiver knowledge) leaks through the sealed boundary.
+    data["meta"] = {k: v for k, v in data["meta"].items() if k in _WIRE_META_KEYS}
+    bindings: dict[str, Any] = {}
+    for atom in packet.atoms:
+        if not atom.code or atom.cv is None:
+            continue
+        key = f"{atom.code}:{atom.cv}"
+        if key in bindings:
+            continue
+        concept = codec.codebook.get_by_code(atom.code)
+        if concept is None:
+            bindings[key] = None
+            continue
+        pattern = codec.patterns.by_concept_id(concept.id)
+        bindings[key] = pattern.canonical if pattern is not None else concept.canonical
+    data["bindings"] = bindings
+    return json.dumps(data, sort_keys=True, separators=(",", ":"))
+
+
+def _render_sage_variant_packets(cb: Any, variant_spec: dict[str, Any]) -> dict[int, dict[str, Any]]:
+    """Re-encode a SAGE variant through the REAL codec, exactly like the benchmark.
+
+    Mirrors ``cb._run_sage_variant``'s per-variant setup: schema reset,
+    ``Settings`` from the spec, codebook registration from ``spec[\"codebook\"]``
+    in order, pinned packet ids (per variant/turn), the v10 pattern warm-up
+    exchange (learn + activate), and the per-turn encode+decode sequence
+    (``use_receiver_knowledge``/``use_patterns``/``base_state``/``inline_limit``
+    from the spec; the decode keeps ACKed receiver knowledge and reference
+    resolution in the same state the benchmark's run had).  For every turn it
+    returns the canonical rendering of the REAL encoded packet plus the
+    recorded wire bytes (``context_report`` right after encode) and the
+    accumulated reconstruction.  Because the setup is deterministic, the
+    re-encoded wire bytes equal the benchmark's recorded ``wire_bytes`` for
+    the same ``(variant, turn)`` -- the honesty gate proven in
+    ``tests/test_model_eval_packet.py``.
+    """
+    from sqlalchemy import select
+
+    from sage_plugin import db as db_module
+    from sage_plugin.codec import SageCodec
+    from sage_plugin.config import Settings
+    from sage_plugin.db import SessionLocal
+    from sage_plugin.db_models import LearnedPattern
+
+    db_module.init_db()
+    cb._reset_schema(db_module)
+    settings = Settings(
+        auth_required=False,
+        database_url=os.environ.get("SAGE_DATABASE_URL", "sqlite://"),
+        context_accounting_enabled=True,
+        learning_mode="managed",
+        **variant_spec.get("settings", {}),
+    )
+    results: dict[int, dict[str, Any]] = {}
+    reconstruction = ""
+    with SessionLocal() as db:
+        codec = SageCodec(db, settings)
+        for canonical in variant_spec["codebook"]:
+            codec.codebook.register("global", canonical)
+        db.commit()
+
+        warmup = variant_spec.get("warmup")
+        if warmup is not None:
+            cb._pin_packet_id(codec, variant_spec["id"], "warmup")
+            codec.encode(cb._sage_request(warmup, auto_learn=True, record_learning=True))
+            pattern = db.scalar(select(LearnedPattern))
+            if pattern is not None:
+                codec.patterns.set_status(pattern.pattern_id, "active")
+                db.commit()
+
+        base_id: str | None = None
+        for turn in range(6):
+            cb._pin_packet_id(codec, variant_spec["id"], turn)
+            content = variant_spec["content_fn"](turn)
+            base_state = base_id if (turn > 0 and variant_spec.get("chain_states")) else None
+            inline_limit = variant_spec.get("inline_limit") if turn == 0 else None
+            request = cb._sage_request(
+                content,
+                use_receiver_knowledge=variant_spec.get("ack", False),
+                use_patterns=variant_spec.get("patterns", True),
+                base_state=base_state,
+                inline_limit=inline_limit,
+            )
+            encoded = codec.encode(request)
+            encode_report = codec.context_report()
+            if encode_report is None:  # pragma: no cover - accounting is enabled above
+                raise RuntimeError("codec context report unavailable during sealed packet rendering")
+            decoded = codec.decode(
+                encoded.packet,
+                resolve_refs=variant_spec.get("resolve_refs", False),
+                receiver="bob",
+                acknowledge=variant_spec.get("ack", False),
+            )
+            piece = variant_spec["render_fn"](decoded)
+            reconstruction = f"{reconstruction} {piece}".strip()
+            if variant_spec.get("chain_states") and encoded.packet.meta.get("state"):
+                base_id = str(encoded.packet.meta["state"])
+            results[turn] = {
+                "rendering": _render_packet_json(codec, encoded.packet),
+                "wire_bytes_json": encode_report.wire_bytes_json,
+                "wire_bytes_msgpack": encode_report.wire_bytes_msgpack,
+                "reconstruction": reconstruction,
+                "piece": piece,
+                "strategy": encoded.strategy,
+                "note": f"sage strategy: {encoded.strategy}",
+            }
+    return results
+
+
+#: Deterministic re-encode cache: the rendering for a (variant, turn) is fully
+#: determined by the variant spec and the freshly reset schema, so re-encodes
+#: are cached per key (the wire-bytes honesty gate in the tests proves the
+#: cached rendering corresponds to the benchmark's recorded packet).  NOTE:
+#: the cache is PER-PROCESS and benchmark-fixed -- the harness always renders
+#: against the same ``cb`` module whose ``_sage_specs()`` are module-constant,
+#: so (variant id, turn) fully identifies the spec.  If this were ever reused
+#: with a different benchmark module sharing variant ids, the key would need
+#: the spec identity (or a spec fingerprint).
+_PACKET_RENDER_CACHE: dict[tuple[str, int], str] = {}
+
+
+def _render_actual_packet(cb: Any, variant_spec: dict[str, Any], turn: int) -> str:
+    """The sealed direct-symbolic model-facing packet for a SAGE variant turn.
+
+    A canonical compact-JSON rendering of the REAL codec packet for the
+    ``(variant, turn)``, deterministically re-encoded exactly like the
+    benchmark (see ``_render_sage_variant_packets``) and cached per key.
+    """
+    key = (variant_spec["id"], turn)
+    cached = _PACKET_RENDER_CACHE.get(key)
+    if cached is not None:
+        return cached
+    for t, entry in _render_sage_variant_packets(cb, variant_spec).items():
+        _PACKET_RENDER_CACHE[(variant_spec["id"], t)] = entry["rendering"]
+    return _PACKET_RENDER_CACHE[key]
+
+
+_SAGE_VARIANT_SPECS_CACHE: dict[str, dict[str, Any]] = {}
+
+
+def _sage_variant_spec(cb: Any, variant_id: str) -> dict[str, Any]:
+    """The stage-2 benchmark's spec for a SAGE variant (cached)."""
+    spec = _SAGE_VARIANT_SPECS_CACHE.get(variant_id)
+    if spec is None:
+        spec = next((s for s in cb._sage_specs() if s["id"] == variant_id), None)
+        if spec is None:
+            raise RuntimeError(f"unknown SAGE variant {variant_id!r} in sealed packet rendering")
+        _SAGE_VARIANT_SPECS_CACHE[variant_id] = spec
+    return spec
 
 
 def _build_exchanges(cb: Any, benchmark: dict[str, Any], selected: list[str]) -> list[dict[str, Any]]:
@@ -495,15 +741,21 @@ def _build_sealed_payload(
     current state (``deployment_allowed``/``failed_tests``/
     ``migration_approved``/``blocker``) plus what changed; text variants ask
     for a summary of the latest update plus what changed.
-    ``model_facing_packet`` uses the same selection as the unsealed
-    ``model_facing_text`` (representation for sage+direct-symbolic, else the
-    stage-2 reconstruction).  ``allowed_decoder_metadata`` carries the
-    decoder-side knowledge the runner may legitimately use: the config's
-    ``codebook_version`` (or ``global:1``), the receiver state and the
-    decoder configuration.
+    ``model_facing_packet`` for SAGE variants in ``direct-symbolic`` mode is
+    the stage-2 REAL packet rendering (``_render_actual_packet`` -- the
+    canonical compact-JSON rendering of the actual codec packet for the
+    ``(variant, turn)``, deterministically re-encoded exactly like the
+    benchmark, cached per key); every other path keeps the stage-1
+    reconstruction selection byte-identical (sealed non-direct-symbolic
+    modes and all non-SAGE variants use ``exchange["reconstruction"]``).
+    ``allowed_decoder_metadata`` carries the decoder-side knowledge the
+    runner may legitimately use: the config's ``codebook_version`` (or
+    ``global:1``), the receiver state and the decoder configuration.
     """
     if exchange["sage"] and decoder_mode == "direct-symbolic":
-        model_facing = exchange["representation"]
+        model_facing = _render_actual_packet(
+            cb, _sage_variant_spec(cb, exchange["variant"]), exchange["turn"]
+        )
     else:
         model_facing = exchange["reconstruction"]
     if exchange["variant"] in _STATE_VARIANTS:

@@ -254,10 +254,19 @@ def test_sealed_payload_task_and_packet_selection(h):
     # default codebook_version when the spec pins none
     assert payload["allowed_decoder_metadata"]["codebook_version"] == "global:1"
     assert payload["allowed_decoder_metadata"]["receiver_state"] == "warm"
-    # sage variant in direct-symbolic -> the representation packet
+    # sage variant in direct-symbolic -> the RENDERED ACTUAL codec packet
+    # (stage 2): a canonical compact-JSON rendering of the real v12 packet
+    # for (v12, turn 1), not the stage-1 canonical-clause proxy.
     sage_exchange = {**text_exchange, "variant": "v12", "sage": True}
     payload = h._build_sealed_payload(cb, sage_exchange, "cold", "direct-symbolic", {"family": "a", "version": "1"})
-    assert payload["model_facing_packet"] == "REPR"
+    rendered = json.loads(payload["model_facing_packet"])
+    assert payload["model_facing_packet"] != "REPR"
+    for key in ("act", "atoms", "bindings", "cb", "id", "meta", "prov", "receiver", "sender", "v"):
+        assert key in rendered
+    assert rendered["atoms"]  # ACKed full-SAGE packets carry code/cv atoms
+    assert rendered["bindings"]
+    for key in ("strategy_note", "canonicals"):
+        assert key not in rendered
     assert "Report the current receiver state" in payload["task"]  # v12 is a state variant
     # sage variant in full-expansion -> reconstruction again
     payload = h._build_sealed_payload(cb, sage_exchange, "cold", "full-expansion", {"family": "a", "version": "1"})
