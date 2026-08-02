@@ -97,10 +97,19 @@ DECODED with ``acknowledge=True`` (receiver "bob"), which COMMITS receiver
 knowledge (known codes / known refs / current_state) into the knowledge
 store -- verified before any warm turn is rendered -- and the warm
 exchanges then encode with ``use_receiver_knowledge=True``, so the warm
-rows' wire bytes ARE the primed lifecycle measurement.  ``receiver_prior``
-is never sent in sealed mode (a leak field); the priming happens ONCE per
-variant before its warm exchanges (fresh receiver state per variant/run:
-per-process scratch DB + schema reset per variant).
+rows' wire bytes ARE the primed lifecycle measurement.  On the CURRENT
+fixture the primed warm wire bytes EQUAL the cold re-encode's (receiver
+knowledge is decoder-side; the wire whitelist strips
+``receiver_known_code_count``), so there is NO wire saving to claim here --
+the honest claim is the primed lifecycle, not a wire delta, and the tests
+assert that equality rather than hiding it.  Warm rows deliberately carry
+no explicit ``primed`` row marker (the internal exchange flag is not
+propagated to rows, keeping the sealed row shape additive by exactly
+``mechanism_used``); sealed ``receiver_state: "warm"`` rows ARE these
+lifecycle-primed re-encodes.  ``receiver_prior`` is never sent in sealed
+mode (a leak field); the priming happens ONCE per variant before its warm
+exchanges (fresh receiver state per variant/run: per-process scratch DB +
+schema reset per variant).
 
 Sealed mode, stage 2 (issue #22 section B mode 1 -- actual packet rendering):
 for SAGE variants (v09-v12) in ``direct-symbolic`` mode the
@@ -221,17 +230,24 @@ Sealed mechanism attribution (issue #22, stage 4 -- default OFF)
 ----------------------------------------------------------------
 Every sealed row carries a ``mechanism_used`` field naming the PRIMARY
 compression mechanism of the turn's encode, derived deterministically from
-the real encode (the packet's own strategy + the decision list the encode
-recorded, via the same re-encode machinery that renders the sealed
-packets): ``"state_delta"`` (delta packet with a base), ``"reference"``
-(reference packet with refs), ``"learned_pattern"`` (a pattern atom fired),
-``"codebook"`` (coded atoms; codebook definitions used), ``"capability"``
-(only when the decisions record a receiver-capability negotiation --
+the real encode, via the same re-encode machinery that renders the sealed
+packets: the packet's own strategy/base/refs/atoms, plus the encode's
+decisions list ONLY for the receiver-capability attribution
+(``fallback_negotiated`` -- the sole decision-level signal consulted;
+``"learned_pattern"`` is inferred from the codec's PATTERN-STORE state, an
+active learned pattern for the coded atom's concept, not from a decision
+record).  The values: ``"state_delta"`` (delta packet with a base),
+``"reference"`` (reference packet with refs), ``"learned_pattern"`` (a
+coded atom's concept has an active learned pattern), ``"codebook"`` (coded
+atoms; codebook definitions used), ``"capability"`` (only when the
+decisions record a receiver-capability negotiation --
 ``fallback_negotiated``), ``"literal"`` (all-literal packet, no compression
 mechanism), or ``"none"`` (plain variants, which have no codec lifecycle).
 The artifact gains a top-level ``mechanism_summary`` mapping each variant
-to its per-mechanism counts across that variant's sealed rows.  This is
-ADDITIVE JSON: no existing row field changes beyond the new key, and
+to its per-mechanism counts across that variant's sealed rows (in held-out
+mode the oracle and frozen rows of the same variant share one bucket; the
+per-row ``mechanism_used`` values stay distinguishable on the rows).  This
+is ADDITIVE JSON: no existing row field changes beyond the new key, and
 default-OFF artifacts carry neither ``mechanism_used`` nor
 ``mechanism_summary``.
 
@@ -714,6 +730,15 @@ _PACKET_RENDER_CACHE: dict[tuple[str, str, int], str] = {}
 #: evaluating the frozen-codebook split.
 _SCENARIO_TAG: str = "default"
 
+#: Pristine scenario globals of the loaded benchmark module, captured the
+#: FIRST time a held-out patch replaces them and restored when the default
+#: scenario is applied again.  Keyed by the module object so in-process
+#: reuse of ``_apply_scenario`` (tests/dev) always restores the module it
+#: patched; ``run_harness`` loads a fresh benchmark module per call, so a
+#: default-OFF run never finds a stash entry and stays byte-identical to
+#: stage 3.
+_ORIGINAL_SCENARIO_GLOBALS: dict[Any, dict[str, Any]] = {}
+
 
 def _render_actual_packet(cb: Any, variant_spec: dict[str, Any], turn: int) -> str:
     """The sealed direct-symbolic model-facing packet for a SAGE variant turn.
@@ -805,14 +830,18 @@ def _mechanism_for_encode(codec: Any, encoded: Any, decisions: list[dict[str, An
     """The PRIMARY compression mechanism of one real encode (deterministic).
 
     Attribution priority: ``"capability"`` when the decisions record a
-    receiver-capability negotiation (``fallback_negotiated`` -- the only
-    decision-level signal that capabilities changed the encoding; a
-    capability-shrunk byte budget replaces the budget decision in place, so
-    it is not separately attributable); then the packet's own strategy --
+    receiver-capability negotiation (``fallback_negotiated`` -- the ONLY
+    decision-level signal consulted; the decisions list plays no other role
+    here); then the packet's own strategy --
     ``"state_delta"`` for a delta packet with a base, ``"reference"`` for a
     reference packet with refs; then the atom content of a semantic packet
-    -- ``"learned_pattern"`` when a pattern atom fired (the atom's concept
-    has an active learned pattern), ``"codebook"`` when coded atoms are
+    -- ``"learned_pattern"`` when a coded atom's concept has an active
+    learned pattern (inferred from the PATTERN-STORE state via
+    ``codec.patterns.by_concept_id`` -- a deterministic proxy for "a
+    pattern atom fired", NOT a decision-level pattern-usage record; a
+    future fixture whose updates code atoms for the warmup pattern's
+    concept would flip turns to ``"learned_pattern"`` without the pattern
+    actually being applied), ``"codebook"`` when coded atoms are
     present, ``"literal"`` when the packet is all-literal (no compression
     mechanism); else ``"none"``.  Semantic packets carry atoms and
     reference/delta packets carry refs/base instead, so the mapping is
@@ -1154,6 +1183,13 @@ def _apply_scenario(cb: Any, *, held_out: bool) -> list[str] | None:
     whole pipeline to the held-out fixture without touching the frozen
     benchmark file.  Also tags the per-process render/spec caches.
 
+    The ORIGINAL globals are captured on the first held-out patch and
+    RESTORED when the default scenario is applied again, so in-process reuse
+    of this function (tests/dev mixing ``held_out=True`` and
+    ``held_out=False`` in one process) never renders default-tagged packets
+    over held-out content.  A default-OFF run that never patched finds no
+    stash entry and stays byte-identical to stage 3.
+
     Returns the FROZEN codebook (the sorted establishment canonicals) when
     ``held_out`` is true -- the SAGE variants' frozen ``codebook`` list -- and
     ``None`` for the standard scenario.
@@ -1161,6 +1197,12 @@ def _apply_scenario(cb: Any, *, held_out: bool) -> list[str] | None:
     global _SCENARIO_TAG
     if not held_out:
         _SCENARIO_TAG = "default"
+        originals = _ORIGINAL_SCENARIO_GLOBALS.pop(cb, None)
+        if originals is not None:
+            cb.SHARED_CONTEXT = originals["SHARED_CONTEXT"]
+            cb.UPDATES = originals["UPDATES"]
+            cb.STATE_DICTS = originals["STATE_DICTS"]
+            cb.CHANGE_MARKERS = originals["CHANGE_MARKERS"]
         return None
     spec = importlib.util.spec_from_file_location(
         "heldout_scenario", Path(__file__).resolve().parent / "heldout_scenario.py"
@@ -1168,6 +1210,13 @@ def _apply_scenario(cb: Any, *, held_out: bool) -> list[str] | None:
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    if cb not in _ORIGINAL_SCENARIO_GLOBALS:
+        _ORIGINAL_SCENARIO_GLOBALS[cb] = {
+            "SHARED_CONTEXT": cb.SHARED_CONTEXT,
+            "UPDATES": cb.UPDATES,
+            "STATE_DICTS": cb.STATE_DICTS,
+            "CHANGE_MARKERS": cb.CHANGE_MARKERS,
+        }
     cb.SHARED_CONTEXT = module.ESTABLISHMENT_SHARED_CONTEXT
     cb.UPDATES = module.HELDOUT_UPDATES
     cb.STATE_DICTS = module.HELDOUT_STATE_DICTS

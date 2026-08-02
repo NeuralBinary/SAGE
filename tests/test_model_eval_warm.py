@@ -44,7 +44,15 @@ Covers (issue #22, stage 4):
   warm benefit;
 * HELD-OUT + WARM: ``--sealed --held-out`` runs end-to-end with warm rows in
   BOTH codebook modes (frozen AND oracle warm rows, each primed from its own
-  codebook), with warm wire == cold wire per mode on this fixture.
+  codebook), with warm wire == cold wire per mode on this fixture;
+* SCENARIO-GLOBAL RESTORE (hardening): in-process reuse of
+  ``_apply_scenario`` (``held_out=True`` then ``held_out=False``) restores
+  the benchmark module's PRISTINE globals, so a later default render is the
+  phoenix shape, not held-out content;
+* FROZEN-MODE MECHANISM VALUES (hardening): the frozen establishment-only
+  codebook's ``mechanism_used`` per (variant, turn) is pinned (v09 t0
+  ``codebook``, v09 t1-5 ``literal``; v11 ``reference``/``state_delta``;
+  v12 all ``literal``).
 
 All tests are deterministic (fixed inputs, no network, no real model) and
 write their output directories under ``/opt/data/sage/scratch/`` -- never
@@ -470,6 +478,70 @@ def test_heldout_warm_determinism_cli(scratch_dir):
                 (r["oracle_codebook"], r["variant"], r["turn"], r["receiver_model"])
             ]
             assert "mechanism_used" in r
+
+
+def test_apply_scenario_restores_globals_after_held_out(h):
+    """F1 hardening: in-process reuse of _apply_scenario (held_out=True then
+    held_out=False) must restore the benchmark module's PRISTINE scenario
+    globals -- a subsequent default render is the PHOENIX shape, not held-out
+    content (the default call used to leave the held-out patch behind)."""
+    cb = h._load_compression_benchmark()
+    pristine = {
+        "SHARED_CONTEXT": cb.SHARED_CONTEXT,
+        "UPDATES": cb.UPDATES,
+        "STATE_DICTS": cb.STATE_DICTS,
+        "CHANGE_MARKERS": cb.CHANGE_MARKERS,
+    }
+    # sanity: the freshly loaded module is the pristine phoenix fixture
+    assert "Project Phoenix" in cb.SHARED_CONTEXT
+
+    # held-out patch replaces the globals with the Orion fixture
+    frozen_codebook = h._apply_scenario(cb, held_out=True)
+    assert frozen_codebook is not None
+    assert cb.SHARED_CONTEXT != pristine["SHARED_CONTEXT"]
+    assert "Project Orion" in cb.SHARED_CONTEXT
+
+    # a default call must restore the pristine globals byte-identically
+    assert h._apply_scenario(cb, held_out=False) is None
+    for name, expected in pristine.items():
+        assert getattr(cb, name) == expected, name
+
+    # a subsequent default render is the phoenix shape, not held-out content.
+    # Clear the per-process caches first so the render genuinely re-reads the
+    # RESTORED globals instead of serving a cache entry compiled earlier.
+    h._SAGE_VARIANT_SPECS_CACHE.clear()
+    h._PACKET_RENDER_CACHE.clear()
+    h._WARM_PACKET_RENDER_CACHE.clear()
+    h._FROZEN_PACKET_RENDER_CACHE.clear()
+    spec = h._sage_variant_spec(cb, "v09")
+    rendered = json.loads(h._render_sage_variant_packets(cb, spec)[0]["rendering"])
+    text = json.dumps(rendered)
+    assert "phoenix" in text
+    assert "orion" not in text
+
+
+def test_heldout_frozen_mode_mechanism_values(h, monkeypatch):
+    """FROZEN-codebook mechanism_used values are pinned (the standard-scenario
+    mapping is fully pinned; this closes the reviewer's coverage note for the
+    frozen mode): the establishment-only frozen codebook renders v09 t0 as
+    ``codebook`` and the unseen held-out turns as ``literal``, v11 keeps its
+    reference/state_delta design, v12 is all-literal (the frozen text-clause
+    codebook never codes the held-out state-field updates)."""
+    monkeypatch.setenv("SAGE_BENCH_LLM_PROVIDER", "fake")
+    results = h.run_harness(
+        _sealed_adapters_config(), variants=["v09", "v11", "v12"], sealed=True, held_out=True
+    )
+    frozen = [r for r in results["rows"] if r["oracle_codebook"] is False]
+    assert frozen
+    expected = {
+        "v09": {0: "codebook", **{t: "literal" for t in range(1, 6)}},
+        "v11": {0: "reference", **{t: "state_delta" for t in range(1, 6)}},
+        "v12": {t: "literal" for t in range(6)},
+    }
+    for row in frozen:
+        assert row["mechanism_used"] == expected[row["variant"]][row["turn"]], (
+            row["variant"], row["turn"], row["receiver_state"], row["mechanism_used"]
+        )
 
 
 # ---------------------------------------------------------------------------
