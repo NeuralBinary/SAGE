@@ -103,3 +103,20 @@ Run `sage-qualify --vocabulary 100,1000,5000` to measure exact and bounded-fuzzy
 `src/sage_plugin/corpus.py` defines a reproducible JSONL task corpus containing sender state, receiver prior state, full context, task intent, expected outcome, and strategy representations. `scripts/model_matrix_benchmark.py` invokes explicitly configured model commands and records observed task success, input/output tokens, latency, retries, semantic loss, wire bytes, and provider/infrastructure cost. It never fabricates provider measurements when a model adapter or credentials are absent.
 
 Release analysis should compare raw context, caller-supplied retrieval/summary strategies, state+refs, structural SAGE, learned patterns, and receiver-aware SAGE. The primary economic metrics are net successful-task savings and task utility per transmitted bit, not compression ratio alone.
+
+## Semantic context compression benchmark and model evaluation harness
+
+The deterministic compression benchmark (`scripts/compression_benchmark.py`) separates transport, model-visible, and semantic compression for the twelve RFC "Phoenix" variants over a fixed six-turn conversation. It is fully deterministic (no RNG, fixed timestamp, pinned packet ids, isolated per-variant scratch database) and requires no provider. Its honest headline, reproducible with `uv run --with '.[dev,mcp]' python scripts/compression_benchmark.py`:
+
+- v09 SAGE codebooks: 1,172 wire bytes vs 2,027 baseline (v01) — about 42% less wire — with full fidelity (task success 1.0, all per-fact-type fidelity checks 1.0); codebook setup 675 bytes, break-even 5 uses.
+- v10 codebooks + learned patterns: 1,341 wire bytes, setup 946 bytes, break-even 9 — the pattern's setup exceeds this short fixture's repayment horizon.
+- v11 references + state deltas and v12 ACKed receiver knowledge: negative per-use savings on this fixture (break-even equals setup cost, i.e. no break-even within six turns). These rows are deliberately honest about the short fixture; pattern amortization is a longer-conversation effect.
+
+The model-evaluation harness (`scripts/model_eval_harness.py`, issue #16 stage 3) measures the same variants' downstream task success on real model runtimes through configured external adapters:
+
+- cold vs warm receivers (warm = ACKed shared context prior), both reported, plus warm-vs-cold deltas;
+- at least two distinct model families (config gate) and the RFC's six-column public result table (`| Variant | Wire bytes | Input tokens | Total cost | Task accuracy | Critical-fact recall |`);
+- decoder-assisted mode counts expansion tokens in `input_tokens` (RFC "prevent hidden decompression costs"): decoding-step tokens are always counted, a conservative upper bound when the adapter already bills the expanded text;
+- deterministic artifacts (byte-identical across runs modulo the measured per-adapter-call `latency_ms`); no provider configured means `not run, no provider`, exit 0 — provider numbers are never fabricated.
+
+Stage 4 closes the feedback loop: `--record-feedback` records each SAGE variant's measured task success (the mean of the adapter-reported `task_success` for that variant's rows) into the codec's pattern store through the existing `PatternStore.record_feedback` path — mirroring `runtime.feedback` semantics (`task_success` validated to `[0, 1]`, `KeyError` on an unknown packet id, decisions from the `MessageAudit` rows the real encodes created). The result is an additive top-level `feedback` JSON key in the artifact (patterns updated, `task_utility`/`utility_score` before and after per pattern), with zero wire-byte change: feedback is post-hoc database bookkeeping and never touches encode. Default OFF keeps artifacts byte-identical to a run without the flag.

@@ -128,6 +128,22 @@ artifacts and JSON artifacts except for the measured per-adapter-call
 excluded from determinism comparisons); ``generated_at`` is pinned to the
 benchmark's fixed timestamp.
 
+Feedback loop (issue #16, stage 4 -- RFC "learned semantic shorthand"):
+with ``--record-feedback`` (default OFF), after the exchanges the harness
+records each selected SAGE variant's measured task success (the mean of the
+adapter-reported ``task_success`` for that variant's rows) into the codec's
+pattern store via ``PatternStore.record_feedback``, mirroring
+``runtime.feedback`` semantics: ``task_success`` must be in ``[0, 1]``
+(``ValueError``), an unknown ``packet_id`` raises ``KeyError``, and the
+decisions come from the ``MessageAudit`` rows the real encodes created
+(pinned packet ids per variant/turn, re-encoded deterministically into the
+scratch database).  The feedback summary (patterns updated, ``task_utility``
+and ``utility_score`` before/after per pattern) is ADDITIVE JSON -- a new
+top-level ``feedback`` key in the artifact -- and never alters existing row
+fields or the RFC table; wire bytes are byte-identical with or without the
+flag (feedback is post-hoc DB bookkeeping, never touches encode).  Without
+the flag the artifacts are byte-identical to the stage-3 shape.
+
 ``run_harness`` (the public API) refuses to run unless ``SAGE_DATABASE_URL``
 is set to a writable scratch database path -- it never operates on the
 ambient default database (``~/sage.db``); ``main()`` sets this up
@@ -696,6 +712,157 @@ def _prebound_sage_plugin_conflict() -> str | None:
     )
 
 
+def _record_feedback_for_packets(
+    db: Any,
+    settings: Any,
+    packets: list[tuple[int, str]],
+    task_success: float,
+) -> dict[str, Any]:
+    """Record measured task success against pinned audit rows (issue #16,
+    stage 4 -- the RFC "learned semantic shorthand" feedback loop).
+
+    Mirrors ``runtime.feedback`` semantics exactly: ``task_success`` must be
+    in ``[0, 1]`` (``ValueError`` otherwise, validated BEFORE any lookup),
+    an unknown ``packet_id`` raises ``KeyError``, and the decisions consumed
+    by ``PatternStore.record_feedback`` come from the ``MessageAudit`` row
+    the real encode created.  Returns a per-packet + merged per-pattern
+    before/after summary (status, ``task_utility``, ``utility_score``) --
+    additive JSON only, never a change to any existing field.
+
+    ``packets`` is a list of ``(turn, packet_id)`` pairs for one SAGE variant.
+
+    NOTE (cumulative semantics): each packet's ``patterns_updated`` field is
+    CUMULATIVE -- ``len(merged)`` across all packets processed so far for
+    this variant (``merged`` accumulates outside the packet loop), NOT a
+    per-packet count.  The variant-level ``patterns_updated`` list in the
+    returned summary is the authoritative merged per-pattern before/after
+    view.
+    """
+    if not 0.0 <= task_success <= 1.0:
+        raise ValueError("task_success must be in [0, 1]")
+    from sqlalchemy import select
+
+    from sage_plugin.db_models import MessageAudit
+    from sage_plugin.patterns import PatternStore
+
+    store = PatternStore(db, settings)
+    packets_summary: list[dict[str, Any]] = []
+    merged: dict[str, dict[str, Any]] = {}
+    for turn, packet_id in packets:
+        audit = db.scalar(select(MessageAudit).where(MessageAudit.packet_id == packet_id))
+        if audit is None:
+            raise KeyError(packet_id)
+        touched_ids = sorted(
+            {decision.get("pattern_id") for decision in audit.decisions if isinstance(decision.get("pattern_id"), str)}
+        )
+        before: dict[str, dict[str, Any]] = {}
+        for pattern_id in touched_ids:
+            pattern = store.get(pattern_id)
+            if pattern is not None:
+                before[pattern_id] = {
+                    "status": pattern.status,
+                    "task_utility": pattern.task_utility,
+                    "utility_score": store.utility_score(pattern),
+                }
+        updated = store.record_feedback(audit.decisions, task_success)
+        after: dict[str, dict[str, Any]] = {}
+        for pattern in updated:
+            after[pattern.pattern_id] = {
+                "status": pattern.status,
+                "task_utility": pattern.task_utility,
+                "utility_score": store.utility_score(pattern),
+            }
+        for pattern_id in sorted(set(before) | set(after)):
+            merged[pattern_id] = {
+                "pattern_id": pattern_id,
+                "status_before": before.get(pattern_id, {}).get("status"),
+                "status_after": after.get(pattern_id, {}).get("status"),
+                "task_utility_before": before.get(pattern_id, {}).get("task_utility"),
+                "task_utility_after": after.get(pattern_id, {}).get("task_utility"),
+                "utility_score_before": before.get(pattern_id, {}).get("utility_score"),
+                "utility_score_after": after.get(pattern_id, {}).get("utility_score"),
+            }
+        packets_summary.append(
+            {
+                "packet_id": packet_id,
+                "turn": turn,
+                "decisions": len(audit.decisions),
+                "patterns_updated": len(merged),
+            }
+        )
+    return {
+        "task_success": task_success,
+        "packets": packets_summary,
+        "patterns_updated": [merged[pattern_id] for pattern_id in sorted(merged)],
+    }
+
+
+def _record_benchmark_feedback(cb: Any, selected: list[str], rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Record each selected SAGE variant's measured task success into the
+    codec's pattern store (issue #16, stage 4).
+
+    For every selected SAGE variant (v09-v12) the variant's six exchanges
+    are re-encoded into the scratch database through the REAL codec with the
+    benchmark's pinned packet ids (deterministic, exactly like the
+    benchmark's own ``_run_sage_variant``), so the ``MessageAudit`` rows the
+    real encodes created exist; each packet's decisions are then recorded
+    with the variant's measured task success -- the mean of the
+    adapter-reported ``task_success`` values for that variant's rows -- via
+    ``_record_feedback_for_packets`` (``runtime.feedback`` semantics).
+
+    This is post-hoc DB bookkeeping: the wire bytes reported in the artifact
+    come from the benchmark's recorded turn data, never from this re-encode,
+    so the SAGE variants' wire bytes are byte-identical with or without the
+    flag.  The returned summary is additive JSON (a top-level ``feedback``
+    key) and never alters existing row fields or the RFC table.
+    """
+    from sage_plugin import db as db_module
+    from sage_plugin.config import Settings
+    from sage_plugin.db import SessionLocal
+
+    db_module.init_db()
+    sage_specs = {spec["id"]: spec for spec in cb._sage_specs()}
+    rows_by_variant: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        rows_by_variant[row["variant"]].append(row)
+    variants: list[dict[str, Any]] = []
+    for variant_id in sorted(set(selected) & set(sage_specs)):
+        variant_rows = rows_by_variant.get(variant_id)
+        if not variant_rows:
+            continue
+        task_success = statistics.mean(row["task_success"] for row in variant_rows)
+        spec = sage_specs[variant_id]
+        settings = Settings(
+            auth_required=False,
+            database_url=os.environ.get("SAGE_DATABASE_URL", "sqlite://"),
+            context_accounting_enabled=True,
+            learning_mode="managed",
+            **spec.get("settings", {}),
+        )
+        # Real encodes -> MessageAudit rows for this variant (schema reset per
+        # variant, exactly like the benchmark's own run loop).
+        cb._run_sage_variant(spec)
+        packets = [
+            (turn, "P" + hashlib.sha256(f"{variant_id}:{turn}".encode()).hexdigest()[:32])
+            for turn in range(6)
+        ]
+        with SessionLocal() as db:
+            summary = _record_feedback_for_packets(db, settings, packets, task_success)
+            db.commit()
+        summary["variant"] = variant_id
+        summary["variant_name"] = spec["name"]
+        variants.append(summary)
+    return {
+        "recorded": True,
+        "note": (
+            "measured downstream task success recorded into the codec's pattern store via "
+            "PatternStore.record_feedback (runtime.feedback semantics); post-hoc DB bookkeeping "
+            "-- zero wire-byte change"
+        ),
+        "variants": variants,
+    }
+
+
 def run_harness(
     adapters: dict[str, Any],
     *,
@@ -703,6 +870,7 @@ def run_harness(
     symbolic_examples: bool = False,
     variants: list[str] | None = None,
     timeout: float = 120.0,
+    record_feedback: bool = False,
 ) -> dict[str, Any]:
     """Run the model evaluation harness end-to-end and return the full results.
 
@@ -762,7 +930,8 @@ def run_harness(
     deltas = _warm_vs_cold_deltas(table_rows)
     markdown = _format_markdown_table(table_rows)
     markdown_full = markdown + ("\n\n" + _format_delta_table(deltas) if deltas else "")
-    return {
+    feedback = _record_benchmark_feedback(cb, selected, rows) if record_feedback else None
+    results = {
         "schema": "sage.model_eval_harness.v1",
         "generated_at": cb.FIXED_TIMESTAMP,
         "scenario": benchmark["scenario"],
@@ -782,6 +951,9 @@ def run_harness(
         "markdown_table": markdown,
         "markdown": markdown_full,
     }
+    if feedback is not None:
+        results["feedback"] = feedback
+    return results
 
 
 def _write_artifacts(out_dir: str | Path, results: dict[str, Any]) -> None:
@@ -861,6 +1033,16 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="comma-separated variant ids to evaluate (default: all twelve; an empty value is an error)",
     )
+    parser.add_argument(
+        "--record-feedback",
+        action="store_true",
+        help=(
+            "record each SAGE variant's measured task success into the codec's pattern store "
+            "via PatternStore.record_feedback (runtime.feedback semantics; additive 'feedback' "
+            "JSON summary key, zero wire-byte change).  Default OFF: artifacts are byte-identical "
+            "to a run without the flag."
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.adapters is None or not provider_available():
@@ -869,9 +1051,10 @@ def main(argv: list[str] | None = None) -> int:
 
     # Reject an --output path that exists as a FILE before anything runs (no
     # traceback, no wasted adapter calls).  The directory itself is only
-    # created AFTER the adapters config has loaded AND the --variants value
-    # has validated, so no config-error path leaves an empty output dir
-    # behind.
+    # created AFTER run_harness has succeeded, immediately before the
+    # artifacts are written (see below), so NO validation or error path --
+    # missing adapters, empty --variants, unknown variant id, adapter
+    # failure -- leaves an empty output dir behind.
     output_dir: Path | None = None
     if args.output is not None:
         out: Path = args.output
@@ -906,11 +1089,6 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         variants = [item for item in segments if item]
 
-    # Create the output dir only now -- adapters loaded AND --variants
-    # validated -- so no config-error path leaves an empty directory behind.
-    if output_dir is not None:
-        output_dir.mkdir(parents=True, exist_ok=True)
-
     # Bind a STABLE per-process scratch database BEFORE any sage_plugin import
     # (db.py creates the engine at import time).  The file lives in
     # ~/.sage-bench -- never in the --output dir -- and is never deleted
@@ -927,6 +1105,7 @@ def main(argv: list[str] | None = None) -> int:
             symbolic_examples=args.with_examples,
             variants=variants,
             timeout=args.timeout,
+            record_feedback=args.record_feedback,
         )
     except ValueError as exc:
         print(f"model evaluation harness: error: {exc}", file=sys.stderr)
@@ -949,12 +1128,26 @@ def main(argv: list[str] | None = None) -> int:
         print()
         print(_format_delta_table(results["deltas"]))
     if output_dir is not None:
+        # Create the output dir only now: run_harness has fully succeeded
+        # (adapters loaded, --variants validated, every variant id known,
+        # adapters ran without error), and this dir is only ever used by
+        # _write_artifacts -- so every validation/error path above exits
+        # without leaving an empty directory behind.
+        output_dir.mkdir(parents=True, exist_ok=True)
         try:
             _write_artifacts(output_dir, results)
         except RuntimeError as exc:
             print(f"model evaluation harness: error: {exc}", file=sys.stderr)
             return 1
         print(f"\nArtifacts written to {output_dir}")
+    if args.record_feedback:
+        feedback = results.get("feedback")
+        if feedback is not None:
+            variants_note = ", ".join(
+                f"{item['variant']} (patterns updated: {len(item['patterns_updated'])})"
+                for item in feedback["variants"]
+            )
+            print(f"Feedback recorded (--record-feedback): {variants_note or 'no SAGE variants selected'}")
     return 0
 
 
