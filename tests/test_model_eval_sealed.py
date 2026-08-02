@@ -24,6 +24,18 @@ Covers (issue #22, stage 1):
   ``evaluation_boundary`` key and no per-row ``sealed``/``task_response``;
 * sealed mode with a missing/empty ``task_response`` raises an
   adapter-naming RuntimeError (exit 1 through the CLI);
+* the adapter subprocess environment is scrubbed of every ``SAGE_*``
+  variable (the scratch ground-truth DB path must never be reachable by a
+  hostile adapter -- adversary F1): a unit test spawns a child through
+  ``_invoke`` with ``SAGE_DATABASE_URL`` + ``SAGE_BENCH_LLM_PROVIDER`` set
+  in the parent env and asserts the child sees none, and an ENV-LEAK-
+  DETECTING adapter (checks its own env, exits 3 on any ``SAGE_*`` key)
+  passes an end-to-end ``--sealed`` CLI run, with a negative control
+  proving the detector is armed;
+* sealed ``task_response`` is capped at ``MAX_TASK_RESPONSE_CHARS``
+  (oversized replies raise an adapter-naming RuntimeError / CLI exit 1 with
+  no artifact written -- adversary F2), and the exact-cap boundary is still
+  accepted;
 * no-provider skip with ``--sealed`` prints "not run, no provider", exit 0.
 
 All tests are deterministic (fixed inputs, no network, no real model) and
@@ -78,6 +90,22 @@ FAKE_ADAPTER_ECHO_CLAIM_ZERO = (
 #: Adapter that never reports a task_response (sealed contract violation).
 FAKE_ADAPTER_NO_TASK_RESPONSE = (
     "import json,sys; print(json.dumps({'input_tokens': 1, 'output_tokens': 1, 'provider_cost_usd': 0.0}))"
+)
+
+#: ENV-LEAK-DETECTING fake adapter: reads the payload from stdin; if the
+#: child environment carries ANY ``SAGE_*`` variable (e.g. a leaked
+#: SAGE_DATABASE_URL pointing at the harness's ground-truth scratch DB) it
+#: prints {"error": "ENV_LEAK", "keys": [...]} and exits 3 (proving the
+#: detector is armed), otherwise it echoes a valid sealed reply.  Proves
+#: ``_invoke`` scrubs SAGE_* variables from the adapter subprocess env
+#: (issue #22 adversary F1).
+FAKE_ADAPTER_ENV_LEAK = (
+    "import json,sys,os; p=json.load(sys.stdin); "
+    "leak=[k for k in os.environ if k.startswith('SAGE_')]; "
+    "print(json.dumps({'error':'ENV_LEAK','keys':leak})) if leak else None; "
+    "sys.exit(3) if leak else None; "
+    "print(json.dumps({'task_response': 'Project Phoenix is blocked because three integration tests failed.', "
+    "'input_tokens': 7, 'output_tokens': 5, 'provider_cost_usd': 0.0012}))"
 )
 
 #: Unsealed fake adapter (mirrors test_model_eval_harness) -- for the
@@ -519,3 +547,109 @@ def test_non_sealed_results_have_no_evaluation_boundary(h, monkeypatch):
         assert "sealed" not in row
         assert "task_response" not in row
         assert "receiver_prior" in row  # unsealed rows keep the prior field
+
+
+# ---------------------------------------------------------------------------
+# Adapter subprocess env scrubbing (issue #22 adversary F1)
+# ---------------------------------------------------------------------------
+
+
+def test_sealed_adapter_env_scrubbed_in_invoke(h, monkeypatch):
+    """A child spawned by ``_invoke`` must see NO ``SAGE_*`` env vars.
+
+    With ``SAGE_DATABASE_URL`` and ``SAGE_BENCH_LLM_PROVIDER`` set in the
+    PARENT env, a ``python -c`` child that prints the ``SAGE_*`` keys it
+    observes must see an empty list -- and non-SAGE vars (HOME/PATH) must
+    still pass through.
+    """
+    monkeypatch.setenv("SAGE_DATABASE_URL", "sqlite:///should-never-leak.db")
+    monkeypatch.setenv("SAGE_BENCH_LLM_PROVIDER", "fake")
+    child = (
+        "import json,os; "
+        "print(json.dumps({'sage_env_keys': sorted(k for k in os.environ if k.startswith('SAGE_')), "
+        "'has_home': 'HOME' in os.environ, 'has_path': 'PATH' in os.environ}))"
+    )
+    result = h._invoke([sys.executable, "-c", child], {"turn": 1}, 60, "acme")
+    assert result["sage_env_keys"] == []
+    assert result["has_home"] is True
+    assert result["has_path"] is True
+
+
+def test_sealed_env_leak_detecting_adapter_end_to_end(scratch_dir):
+    """A --sealed CLI run whose adapter checks its own env for SAGE_* vars
+    must exit 0: the child env carries no SAGE_* variables (F1)."""
+    cfg = scratch_dir / "adapters.json"
+    cfg.write_text(json.dumps(_two_family_config(FAKE_ADAPTER_ENV_LEAK)))
+    fake_home = scratch_dir / "fakehome"
+    fake_home.mkdir()
+    out_dir = scratch_dir / "out"
+    completed = _run_cli_subprocess(
+        ["--sealed", "--adapters", str(cfg), "--output", str(out_dir), "--variants", "v01,v05"],
+        fake_home,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "ENV_LEAK" not in completed.stdout + completed.stderr
+
+    artifact = json.loads((out_dir / "model_eval_harness.json").read_text())
+    assert artifact["evaluation_boundary"] == "sealed"
+    assert artifact["rows"]
+
+    # negative control: the detector is ARMED -- with a SAGE_* var in ITS env
+    # it must fire (exit 3, ENV_LEAK), proving a leaked env would be caught.
+    leaked_env = {**os.environ, "SAGE_DATABASE_URL": "sqlite:///leak.db"}
+    proc = subprocess.run(
+        [sys.executable, "-c", FAKE_ADAPTER_ENV_LEAK],
+        input=json.dumps({"turn": 1}),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=leaked_env,
+    )
+    assert proc.returncode == 3
+    assert "ENV_LEAK" in proc.stdout
+
+
+# ---------------------------------------------------------------------------
+# Oversized task_response cap (issue #22 adversary F2)
+# ---------------------------------------------------------------------------
+
+
+def _oversized_task_response_script(h: Any) -> str:
+    """Adapter script replying with a task_response one char over the cap."""
+    return (
+        "import json,sys; print(json.dumps("
+        f"{{'task_response': 'x' * {h.MAX_TASK_RESPONSE_CHARS + 1}, 'input_tokens': 1, 'output_tokens': 1, "
+        "'provider_cost_usd': 0.0}))"
+    )
+
+
+def test_sealed_oversized_task_response_raises(h, monkeypatch):
+    monkeypatch.setenv("SAGE_BENCH_LLM_PROVIDER", "fake")
+    with pytest.raises(RuntimeError, match="acme-bad") as exc_info:
+        h.run_harness(
+            _two_family_config(_oversized_task_response_script(h)),
+            variants=["v01"],
+            sealed=True,
+        )
+    assert "task_response" in str(exc_info.value)
+    assert "characters" in str(exc_info.value)
+
+    # boundary: exactly MAX_TASK_RESPONSE_CHARS chars is still accepted
+    cb = h._load_compression_benchmark()
+    h._score_sealed_response(cb, _exchange(1), "x" * h.MAX_TASK_RESPONSE_CHARS, "acme")
+
+
+def test_sealed_oversized_task_response_cli_exit_1(scratch_dir, h):
+    cfg = scratch_dir / "adapters.json"
+    cfg.write_text(json.dumps(_two_family_config(_oversized_task_response_script(h))))
+    fake_home = scratch_dir / "fakehome"
+    fake_home.mkdir()
+    out_dir = scratch_dir / "out"
+    completed = _run_cli_subprocess(
+        ["--sealed", "--adapters", str(cfg), "--output", str(out_dir), "--variants", "v01"],
+        fake_home,
+    )
+    assert completed.returncode == 1
+    assert "task_response" in completed.stderr
+    assert "acme-bad" in completed.stderr
+    assert not out_dir.exists()  # no artifact written on the rejection path

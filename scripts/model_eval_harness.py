@@ -89,7 +89,10 @@ sealed mode.  ``--sealed`` cannot be combined with ``--with-examples``
 (example meanings are evaluator-side decoder knowledge).  Sealed artifacts
 carry a top-level ``evaluation_boundary: "sealed"`` and per-row
 ``sealed: true`` + ``task_response``; default OFF keeps every artifact
-byte-identical to the stage-3/4 shape.
+byte-identical to the stage-3/4 shape.  NOTE: in sealed mode warm rows
+currently carry no ``receiver_prior`` (warm == cold behaviorally) -- the
+lifecycle-primed warm receiver is a stage-4 deliverable, not a stage-1
+feature.
 
 RFC field mapping (per result row)
 ----------------------------------
@@ -211,6 +214,14 @@ NO_PROVIDER_NOTE = "not run, no provider"
 #: namespace/release label -- see ``sage_plugin.codebook_releases``).
 DEFAULT_CODEBOOK_VERSION = "global:1"
 
+#: Maximum accepted length (in characters) of a sealed-mode ``task_response``
+#: string.  The harness persists the adapter's reply verbatim into the
+#: artifact, so an unbounded reply would let a hostile adapter bloat the
+#: artifact (or exhaust harness memory) at will -- issue #22 adversary
+#: finding F2.  Replies longer than this are rejected with an
+#: adapter-naming RuntimeError before any scoring or persistence.
+MAX_TASK_RESPONSE_CHARS = 100_000
+
 DECODER_MODES = ("direct-symbolic", "decoder-assisted", "full-expansion")
 DECODER_LABELS = {
     "direct-symbolic": "direct symbolic",
@@ -319,7 +330,15 @@ def load_adapters(path: str | Path) -> dict[str, Any]:
 
 
 def _invoke(command: list[str], payload: dict[str, Any], timeout: float, identity: str) -> dict[str, Any]:
-    """Invoke an adapter command (mirrors ``model_matrix_benchmark._invoke``)."""
+    """Invoke an adapter command (mirrors ``model_matrix_benchmark._invoke``).
+
+    The child environment is SCRUBBED of every ``SAGE_*`` variable: adapter
+    processes are hostile in the sealed threat model and must never be able
+    to reach the evaluator's ground-truth codec database through an inherited
+    ``SAGE_DATABASE_URL`` (or any other ``SAGE_*`` setting) -- issue #22
+    adversary finding F1.  ``HOME``/``PATH`` and all non-SAGE variables pass
+    through unchanged.
+    """
     started = time.perf_counter()
     try:
         completed = subprocess.run(
@@ -329,6 +348,7 @@ def _invoke(command: list[str], payload: dict[str, Any], timeout: float, identit
             capture_output=True,
             timeout=timeout,
             check=False,
+            env={k: v for k, v in os.environ.items() if not k.startswith("SAGE_")},
         )
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(f"adapter {identity} timed out after {timeout}s") from exc
@@ -674,6 +694,11 @@ def _score_sealed_response(
     if not isinstance(task_response, str) or not task_response.strip():
         raise RuntimeError(
             f"adapter {identity}: sealed task_response must be a non-empty string"
+        )
+    if len(task_response) > MAX_TASK_RESPONSE_CHARS:
+        raise RuntimeError(
+            f"adapter {identity}: sealed task_response exceeds "
+            f"{MAX_TASK_RESPONSE_CHARS} characters (got {len(task_response)})"
         )
     turn_index = exchange["turn"]
     predicted = cb.read_state(task_response)
