@@ -470,4 +470,4 @@ offered by NeuralBinary. Versions 0.2.6 and earlier were released under the MIT
 license.
 
 The LICENSE file contains the full AGPL-3.0 text with the dual-license preamble.
-Commercial licensing inquiries should be directed to sage@neuralbinary.com.
+Commercial licensing inquiries should be directed to sage@digitalacre.org.

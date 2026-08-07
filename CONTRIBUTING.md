@@ -76,6 +76,6 @@ continued development through commercial licensing. Your copyright is retained; 
 simply granting permission for your work to be distributed under both licenses.
 
 If you have questions about this, please open an issue or contact us at
-sage@neuralbinary.com before contributing.
+sage@digitalacre.org before contributing.
 
 Participation also follows [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).

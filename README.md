@@ -518,7 +518,7 @@ SAGE is dual-licensed:
 
 - **Commercial License** — For organizations that want to use SAGE in proprietary
   products, closed-source services, or SaaS offerings without the AGPL's
-  source-disclosure requirements. Contact **sage@neuralbinary.com** for pricing
+  source-disclosure requirements. Contact **sage@digitalacre.org** for pricing
   and terms.
 
 This is the same dual-licensing model used by Grafana, Cal.com, GitLab, Mattermost,
