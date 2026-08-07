@@ -1,4 +1,4 @@
-# SAGE v0.2 Verification Report
+# SAGE v0.2 Verification Record
 
 ## Release identity
 
@@ -9,13 +9,20 @@
 | Repository | https://github.com/NeuralBinary/SAGE |
 | Credits | @NeuralBinary, @ro0ti |
 | Public version | v0.2 |
-| Package version | 0.2.6 |
+| Current source package version | 0.2.7 |
+| Latest verified tagged release | v0.2.6 |
 | Protocol | sage/0.2 |
 | Wire | 2 |
 | Database baseline | 0001_sage_0_2 |
-| License | AGPL-3.0 + Commercial (dual-license) |
+| Current source license | AGPL-3.0-or-later + Commercial (dual-license) |
+| Tagged v0.2.6 license | MIT |
 
 This report records qualification of the clean v0.2 first-deployment baseline on July 31, 2026. No pre-v0.2 protocol reader, compatibility layer, or migration chain is shipped.
+
+
+## v0.2.7 release-candidate scope
+
+v0.2.7 changes release identity, licensing, contributor governance, and benchmark/documentation organization without changing protocol `sage/0.2`, wire version `2`, the `0001_sage_0_2` migration baseline, or the 13 normative TCK vectors. Final v0.2.7 release status is established by the tagged release workflow; the v0.2.6 qualification evidence below remains the record for the latest published tag until that workflow completes.
 
 ## v0.2.6 patch verification
 
@@ -190,6 +197,9 @@ Verified for v0.2.3:
 
 The sections below record the v0.2.1 baseline qualification and remain the
 reference for surfaces unchanged by v0.2.3.
+
+
+> **Historical qualification note:** The detailed baseline sections below were executed for the v0.2.1/v0.2.x line as labeled in this record. They are retained as historical evidence for unchanged protocol surfaces and are not represented as a fresh v0.2.7 execution. The v0.2.7 release workflow is the authoritative qualification gate for the new tag.
 
 ## v0.2 hardening scope
 
@@ -447,11 +457,11 @@ The local Node runtime is below the OpenClaw package's declared production engin
 
 No live Claude, OpenAI, Hermes model provider, or other external model-provider economics run is claimed because provider credentials and those runtimes are absent.
 
-## Result
+## Historical baseline result
 
 All locally executable v0.2 functional, protocol, semantic-safety, security, migration, packaging, interoperability, concurrency, chaos, invariant, performance, query-budget, and release-consistency gates pass in the working tree.
 
-## Source archive qualification
+## Historical source archive qualification
 
 The deterministic source ZIP is extracted into a separate directory and qualified independently from the working tree. The archive-level run passes the release, security, architecture, invariant, generated-schema, and generated-protocol checks. It passes all 107 automated tests, all 13 Python TCK vectors, all 13 JavaScript TCK vectors, all 13 Go TCK vectors, 250/250 malformed-wire mutations, and 1,000 differential cross-runtime comparisons.
 
@@ -465,9 +475,9 @@ All locally executable v0.2 gates therefore pass both in the finalized working t
 
 ## License verification
 
-SAGE v0.2.7 and later are dual-licensed under AGPL-3.0 and a commercial license
+SAGE v0.2.7 and later are dual-licensed under AGPL-3.0-or-later and a commercial license
 offered by NeuralBinary. Versions 0.2.6 and earlier were released under the MIT
 license.
 
-The LICENSE file contains the full AGPL-3.0 text with the dual-license preamble.
+The LICENSE file contains the full AGPLv3 text and an explicit `AGPL-3.0-or-later` selection in the dual-license preamble.
 Commercial licensing inquiries should be directed to sage@digitalacre.org.

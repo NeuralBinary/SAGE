@@ -11,7 +11,7 @@ import zipfile
 from email.parser import Parser
 from pathlib import Path, PurePosixPath
 
-VERSION = "0.2.6"
+VERSION = "0.2.7"
 AUTHOR = "NeuralBinary"
 SOURCE_PREFIX = f"sage-plugin-v{VERSION}/"
 HERMES_PREFIX = f"sage-hermes-plugin-v{VERSION}/"
@@ -48,6 +48,7 @@ def check_source(path: Path) -> dict[str, object]:
             f"{SOURCE_PREFIX}docker-compose.quickstart.yml",
             f"{SOURCE_PREFIX}pyproject.toml",
             f"{SOURCE_PREFIX}CONTRIBUTING.md",
+            f"{SOURCE_PREFIX}CONTRIBUTOR_LICENSE_AGREEMENT.md",
             f"{SOURCE_PREFIX}SECURITY.md",
             f"{SOURCE_PREFIX}SUPPORT.md",
             f"{SOURCE_PREFIX}CODE_OF_CONDUCT.md",
@@ -164,6 +165,11 @@ def check_openclaw(path: Path) -> dict[str, object]:
         require(package.get("author") == AUTHOR, "OpenClaw author drift")
         require(package.get("contributors") == ["NeuralBinary", "ro0ti"], "OpenClaw credits drift")
         require(package.get("license") == "AGPL-3.0-or-later", "OpenClaw license metadata drift")
+        license_member = archive.extractfile("package/LICENSE")
+        require(license_member is not None, "OpenClaw license unreadable")
+        license_text = license_member.read().decode()
+        require("SPDX: AGPL-3.0-or-later" in license_text, "OpenClaw AGPL license payload drift")
+        require(not license_text.startswith("MIT License"), "OpenClaw package still contains MIT license")
     return {"openclaw": path.name, "entries": len(names), "ok": True}
 
 

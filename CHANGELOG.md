@@ -2,14 +2,12 @@
 
 ## 0.2.7
 
-- **License Change:** SAGE is now dual-licensed under AGPL-3.0 and a commercial license.
-  The MIT license was used for versions 0.2.6 and earlier. See LICENSE and COMMERCIAL.md
-  for details.
-
-- **New Files:** Added COMMERCIAL.md explaining the commercial licensing terms and
-  .github/FUNDING.yml for GitHub Sponsors.
-
-- **Updated:** CONTRIBUTING.md now reflects the dual-licensing terms for contributors.
+- **License change:** current source is dual-licensed under `AGPL-3.0-or-later` and a separately negotiated commercial license. Tagged releases 0.2.6 and earlier retain the MIT license shipped with those releases.
+- **Contributor governance:** adds `CONTRIBUTOR_LICENSE_AGREEMENT.md` and a pull-request acknowledgement so external contributions explicitly grant the rights needed for both the AGPL and commercial distributions while contributors retain copyright.
+- **License consistency:** aligns the root, Hermes, OpenClaw, package metadata, and source headers on `AGPL-3.0-or-later`; replaces the stale MIT license bundled with the OpenClaw package.
+- **Release identity:** bumps package, adapter manifests, build scripts, CI artifact names, and release checks to 0.2.7 while keeping quick-start download links on the latest tagged release (v0.2.6) until v0.2.7 is published.
+- **Benchmark documentation:** organizes deterministic Phoenix and frozen held-out Orion measurements by evidence type and keeps provider-backed model claims explicitly pending until an external adapter run is supplied.
+- **Commercial licensing:** rewrites `COMMERCIAL.md` as an informational guide to alternative terms without implying that commercial or SaaS use is categorically prohibited by the AGPL.
 
 ## 0.2.6
 

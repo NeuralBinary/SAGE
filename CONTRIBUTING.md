@@ -65,17 +65,14 @@ Keep pull requests focused. Explain the problem, the chosen behavior, compatibil
 impact, and the verification performed. Reviewers may ask for additional cross-runtime TCK,
 failure-mode, concurrency, or migration evidence when the affected boundary warrants it.
 
-By contributing, you agree that your contribution is licensed under the same dual-licensing
-terms as the project:
+## Contributor license agreement
 
-1. **AGPL-3.0** — For open source use
-2. **Commercial License** — For proprietary use (sold by NeuralBinary)
+SAGE uses dual licensing, so accepted third-party contributions need an explicit inbound grant that permits both the open-source and commercial distributions. Before submitting a pull request, read [CONTRIBUTOR_LICENSE_AGREEMENT.md](CONTRIBUTOR_LICENSE_AGREEMENT.md).
 
-This allows SAGE to remain fully open source while providing a sustainable path for
-continued development through commercial licensing. Your copyright is retained; you're
-simply granting permission for your work to be distributed under both licenses.
+By submitting a pull request and checking the CLA acknowledgement in the pull-request template, you agree to that CLA for the contribution. You retain copyright in your work. The CLA grants NeuralBinary the rights needed to distribute accepted contributions under `AGPL-3.0-or-later` and under separately negotiated commercial SAGE licenses.
 
-If you have questions about this, please open an issue or contact us at
-sage@digitalacre.org before contributing.
+If you are contributing on behalf of an employer or another legal entity, confirm that you have authority to make the contribution and grant those rights. NeuralBinary may request a separately signed agreement for material corporate contributions.
+
+If you cannot agree to the CLA, open an issue before submitting code so the licensing question can be resolved first.
 
 Participation also follows [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).

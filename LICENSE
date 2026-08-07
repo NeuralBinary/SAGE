@@ -1,15 +1,23 @@
 SAGE Dual License
 
-This project is offered under a dual licensing model:
+Current SAGE source on `main`, and releases v0.2.7 and later, are offered under a dual-licensing model:
 
-1. Open Source License — GNU Affero General Public License v3.0 (AGPL-3.0)
-   For open source projects, research, and community use. Full terms below.
+1. Open Source License — GNU Affero General Public License v3.0 or later
+   (SPDX: AGPL-3.0-or-later). You may use, modify, and redistribute SAGE
+   under the AGPL terms below. SAGE expressly selects the "or any later
+   version" option described by section 14 of the AGPL.
 
-2. Commercial License — For organizations that wish to integrate this software
-   into proprietary products or hosted services without the AGPL's open source
-   disclosure requirements.
+2. Commercial License — Alternative proprietary terms may be available
+   directly from NeuralBinary for organizations that prefer not to use SAGE
+   under the AGPL. Commercial terms are granted only by a separate written
+   agreement.
 
-To obtain a commercial license, contact: sage@digitalacre.org
+Tagged releases v0.2.6 and earlier retain the license that shipped with those
+releases.
+
+For commercial licensing, contact: sage@digitalacre.org
+
+The GNU Affero General Public License version 3 text follows verbatim.
 
                     GNU AFFERO GENERAL PUBLIC LICENSE
                        Version 3, 19 November 2007

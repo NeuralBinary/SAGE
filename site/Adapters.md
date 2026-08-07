@@ -1,6 +1,9 @@
 
 # Adapters
 
+> **Version note:** current source manifests are `0.2.7`; install commands below continue to use the latest tagged release, `v0.2.6`, until `v0.2.7` is published.
+
+
 SAGE adapters exchange the same `sage/0.2` wire and durable-bus state while using each host's native lifecycle hooks. The recommended order when integrating a framework: (1) native hook/plugin adapter, (2) A2A as the generic peer envelope, (3) MCP for tool/context access, (4) REST/Python runtime for custom orchestrators. The SAGE server stays the same in all cases.
 
 A key rule applies to every adapter: **adapters must not construct SAGE semantic envelopes**. They pass raw structured application data; semantic and wire encoding remain owned by SAGE. The OpenClaw adapter explicitly rejects content that looks like an encoded SAGE envelope, and the Hermes adapter documents the same rule.
@@ -27,7 +30,7 @@ The release plugin is self-contained and uses only the Python standard library i
 
 ```yaml
 name: sage
-version: "0.2.6"
+version: "0.2.7"
 description: Vendor-neutral SAGE semantic bus with automatic context injection and structured handoff.
 requires_env:
   - SAGE_URL
@@ -63,7 +66,7 @@ For Hermes in Docker: `./install.sh "$HERMES_DATA_DIR"`; when SAGE runs on the D
 
 ## OpenClaw plugin
 
-`integrations/openclaw` is a native mixed tool/hook plugin (`@sage-agent/openclaw-sage@0.2.6`), built from TypeScript (`src/index.ts`) with an independent conformance runner (`dist/conformance.js`).
+`integrations/openclaw` is a native mixed tool/hook plugin (`@sage-agent/openclaw-sage@0.2.7` on `main`), built from TypeScript (`src/index.ts`) with an independent conformance runner (`dist/conformance.js`).
 
 ### Integration surface
 

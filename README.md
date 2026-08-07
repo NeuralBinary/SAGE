@@ -9,10 +9,11 @@ SAGE is a vendor-neutral semantic communication runtime and durable context bus 
 | Repository | https://github.com/NeuralBinary/SAGE |
 | Credits | @NeuralBinary, @ro0ti |
 | Version | v0.2 |
-| Package version | 0.2.6 |
+| Source package version | 0.2.7 |
+| Latest tagged release | v0.2.6 |
 | Protocol | `sage/0.2` |
 | Wire | `2` |
-| Source license (`main`) | AGPL-3.0 + Commercial (dual-license) |
+| Source license (`main`) | AGPL-3.0-or-later + Commercial (dual-license) |
 
 SAGE core is independent of model providers and agent frameworks. Native and protocol adapters connect the same runtime to Hermes, OpenClaw, Claude, OpenAI, A2A, MCP, REST, Python, and custom orchestrators.
 
@@ -444,7 +445,7 @@ python scripts/conformance_matrix.py
 Version identity is locked across `pyproject.toml`, `plugin.json`, the Python
 package, the Hermes manifest and adapter, the OpenClaw package and manifest, the
 spec, the TCK, and this documentation. Release commits prepare that identity
-(e.g. `release: prepare v0.2.6`).
+(e.g. `release: prepare v0.2.7`).
 
 Pushing a tag matching `v*` triggers the `.github/workflows/release.yml`
 workflow, which:
@@ -462,16 +463,16 @@ workflow, which:
 Release assets:
 
 ```text
-Python/runtime   -> sage_agent_protocol-0.2.6-py3-none-any.whl
-Hermes Agent     -> sage-hermes-plugin-v0.2.6.zip
-OpenClaw         -> sage-agent-openclaw-sage-0.2.6.tgz
-Source           -> sage-plugin-v0.2.6.zip
-Verification     -> SAGE-v0.2.6-VERIFICATION.md
-Checksums        -> SAGE-v0.2.6-SHA256SUMS.txt
+Python/runtime   -> sage_agent_protocol-0.2.7-py3-none-any.whl
+Hermes Agent     -> sage-hermes-plugin-v0.2.7.zip
+OpenClaw         -> sage-agent-openclaw-sage-0.2.7.tgz
+Source           -> sage-plugin-v0.2.7.zip
+Verification     -> SAGE-v0.2.7-VERIFICATION.md
+Checksums        -> SAGE-v0.2.7-SHA256SUMS.txt
 ```
 
 The release notes and verification records for the current release are
-`RELEASE-v0.2.6.md` and `VERIFICATION.md`.
+`RELEASE-v0.2.7.md` and `VERIFICATION.md`.
 
 ## Repository structure
 
@@ -494,6 +495,8 @@ The current `main` branch is dual-licensed:
 - **Commercial License** — use SAGE under separate commercial terms for proprietary products, closed-source services, or other deployments where AGPL terms are not suitable. See [COMMERCIAL.md](COMMERCIAL.md) or contact **sage@digitalacre.org**.
 
 Tagged releases **v0.2.6 and earlier remain under the MIT license** as recorded in [CHANGELOG.md](CHANGELOG.md) and [VERIFICATION.md](VERIFICATION.md). The dual-license change applies to the current source line and subsequent releases.
+
+Contributions are accepted under the [SAGE Contributor License Agreement](CONTRIBUTOR_LICENSE_AGREEMENT.md), which preserves contributor ownership while granting the rights needed for both SAGE license tracks.
 
 ---
 

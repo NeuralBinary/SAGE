@@ -76,10 +76,10 @@ The OpenClaw `dist/` outputs (`dist/index.js`, `dist/conformance.js`) cannot be 
 ```bash
 python scripts/build_release.py --output dist
 python scripts/package_check.py \
-  --source dist/sage-plugin-v0.2.6.zip \
-  --wheel dist/sage_agent_protocol-0.2.6-py3-none-any.whl \
-  --hermes dist/sage-hermes-plugin-v0.2.6.zip \
-  --openclaw dist/sage-agent-openclaw-sage-0.2.6.tgz
+  --source dist/sage-plugin-v0.2.7.zip \
+  --wheel dist/sage_agent_protocol-0.2.7-py3-none-any.whl \
+  --hermes dist/sage-hermes-plugin-v0.2.7.zip \
+  --openclaw dist/sage-agent-openclaw-sage-0.2.7.tgz
 ```
 
 `scripts/package_check.py` verifies package metadata, author, the Hermes entry point, protocol specification, protobuf binding, nested JSON Schemas, TCK implementation matrix, and TCK vectors directly from the wheel archive, plus the OpenClaw package (`--openclaw`). For reproducible builds, the release workflow pins `SOURCE_DATE_EPOCH`.
@@ -87,17 +87,17 @@ python scripts/package_check.py \
 Release assets:
 
 ```text
-Python/runtime   -> sage_agent_protocol-0.2.6-py3-none-any.whl
-Hermes Agent     -> sage-hermes-plugin-v0.2.6.zip
-OpenClaw         -> sage-agent-openclaw-sage-0.2.6.tgz
-Source           -> sage-plugin-v0.2.6.zip
-Verification     -> SAGE-v0.2.6-VERIFICATION.md
-Checksums        -> SAGE-v0.2.6-SHA256SUMS.txt
+Python/runtime   -> sage_agent_protocol-0.2.7-py3-none-any.whl
+Hermes Agent     -> sage-hermes-plugin-v0.2.7.zip
+OpenClaw         -> sage-agent-openclaw-sage-0.2.7.tgz
+Source           -> sage-plugin-v0.2.7.zip
+Verification     -> SAGE-v0.2.7-VERIFICATION.md
+Checksums        -> SAGE-v0.2.7-SHA256SUMS.txt
 ```
 
 ## Release workflow
 
-Version identity is locked across `pyproject.toml`, `plugin.json`, the Python package, the Hermes manifest and adapter, the OpenClaw package and manifest, the spec, the TCK, and current-release documentation. Release commits prepare that identity (e.g. `release: prepare v0.2.6`).
+Version identity is locked across `pyproject.toml`, `plugin.json`, the Python package, the Hermes manifest and adapter, the OpenClaw package and manifest, the spec, the TCK, and current-release documentation. Release commits prepare that identity (e.g. `release: prepare v0.2.7`).
 
 Pushing a tag matching `v*` triggers `.github/workflows/release.yml`, which:
 

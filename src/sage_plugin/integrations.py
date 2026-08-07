@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# SAGE is dual-licensed under AGPL-3.0 and a commercial license.
+# SAGE is dual-licensed under AGPL-3.0-or-later and a commercial license.
 # Contact sage@digitalacre.org for commercial licensing.
 from __future__ import annotations
 
@@ -91,11 +91,11 @@ def config_for(platform: str, base_url: str, agent_id: str, workspace: str = "de
     if p.id == "hermes":
         config["remote_mcp_url"] = mcp_url
         files["env"] = f"SAGE_URL={base}\nSAGE_AGENT_ID={agent_id}\nSAGE_WORKSPACE={workspace}\n"
-        commands = ['unzip sage-hermes-plugin-v0.2.6.zip -d "${HERMES_HOME:-$HOME/.hermes}/plugins"', "hermes plugins enable sage"]
+        commands = ['unzip sage-hermes-plugin-v0.2.7.zip -d "${HERMES_HOME:-$HOME/.hermes}/plugins"', "hermes plugins enable sage"]
     elif p.id == "openclaw":
         config["remote_mcp_url"] = mcp_url
         files["env"] = f"SAGE_URL={base}\nSAGE_AGENT_ID={agent_id}\nSAGE_WORKSPACE={workspace}\n"
-        commands = ["openclaw plugins install npm-pack:./sage-agent-openclaw-sage-0.2.6.tgz", "openclaw plugins enable sage", "openclaw plugins inspect sage --runtime --json"]
+        commands = ["openclaw plugins install npm-pack:./sage-agent-openclaw-sage-0.2.7.tgz", "openclaw plugins enable sage", "openclaw plugins inspect sage --runtime --json"]
     elif p.id == "claude":
         config["remote_mcp_url"] = mcp_url
         commands = [f"configure Claude/Claude Code with remote MCP server {mcp_url}"]
@@ -103,5 +103,5 @@ def config_for(platform: str, base_url: str, agent_id: str, workspace: str = "de
         config["remote_mcp_url"] = mcp_url
         commands = [f"configure the OpenAI client/app with the SAGE MCP endpoint {mcp_url}"]
     else:
-        commands = ["pip install ./sage_agent_protocol-0.2.6-py3-none-any.whl", "use SageRuntime or POST /v1/bus/handoff"]
+        commands = ["pip install ./sage_agent_protocol-0.2.7-py3-none-any.whl", "use SageRuntime or POST /v1/bus/handoff"]
     return IntegrationConfigResponse(platform=p.id, profile=p, files=files, commands=commands, config=config)

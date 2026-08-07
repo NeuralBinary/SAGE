@@ -12,10 +12,11 @@ SAGE core is independent of model providers and agent frameworks. Native and pro
 | Repository | https://github.com/NeuralBinary/SAGE |
 | Credits | @NeuralBinary, @ro0ti |
 | Public version | v0.2 |
-| Package version | 0.2.6 |
+| Source package version | 0.2.7 |
+| Latest tagged release | v0.2.6 |
 | Protocol | `sage/0.2` |
 | Wire version | `2` |
-| Source license (`main`) | AGPL-3.0 + Commercial (dual-license) |
+| Source license (`main`) | AGPL-3.0-or-later + Commercial (dual-license) |
 
 ## Key capabilities
 

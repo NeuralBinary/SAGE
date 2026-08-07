@@ -6,7 +6,8 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.2.6"
+EXPECTED_VERSION = "0.2.7"
+LATEST_TAGGED_VERSION = "0.2.6"
 EXPECTED_RELEASE = "v0.2"
 EXPECTED_PROTOCOL = "sage/0.2"
 EXPECTED_WIRE = 2
@@ -61,7 +62,7 @@ def main() -> None:
 
     scale = (ROOT / ".github/workflows/scale.yml").read_text(encoding="utf-8")
     require("permissions:\n  contents: read" in scale, "least-privilege scale permissions missing")
-    for community_file in ("CONTRIBUTING.md", "SECURITY.md", "SUPPORT.md", "CODE_OF_CONDUCT.md"):
+    for community_file in ("CONTRIBUTING.md", "CONTRIBUTOR_LICENSE_AGREEMENT.md", "SECURITY.md", "SUPPORT.md", "CODE_OF_CONDUCT.md", ".github/PULL_REQUEST_TEMPLATE.md"):
         require((ROOT / community_file).is_file(), f"community policy missing: {community_file}")
     require((ROOT / ".github/dependabot.yml").is_file(), "Dependabot configuration missing")
 
@@ -77,35 +78,47 @@ def main() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     for value in ["Project | SAGE", "Author | NeuralBinary", EXPECTED_REPOSITORY, "@NeuralBinary, @ro0ti", f"Version | {EXPECTED_RELEASE}"]:
         require(value in readme, f"README metadata missing: {value}")
+    require(f"Source package version | {EXPECTED_VERSION}" in readme, "README source package version drift")
+    require(f"Latest tagged release | v{LATEST_TAGGED_VERSION}" in readme, "README latest tagged release drift")
+    require((ROOT / f"RELEASE-v{EXPECTED_VERSION}.md").is_file(), "current release notes missing")
 
-    current_release_docs = [
-        "docs/GETTING_STARTED.md",
-        "docs/OPERATIONS.md",
-        "site/Adapters.md",
-        "site/CLI-Tools.md",
-        "site/Development.md",
-        "site/Quickstart.md",
-    ]
-    release_coordinate_patterns = [
-        re.compile(r"github\.com/NeuralBinary/SAGE/releases/(?:download|tag)/v(\d+\.\d+\.\d+)"),
-        re.compile(
-            r"(?:sage_agent_protocol-|sage-hermes-plugin-v|sage-agent-openclaw-sage-"
-            r"|sage-plugin-v|SAGE-v)(\d+\.\d+\.\d+)"
-        ),
-        re.compile(r"@sage-agent/openclaw-sage@(\d+\.\d+\.\d+)"),
-        re.compile(r"release checker enforces version `(\d+\.\d+\.\d+)`", re.IGNORECASE),
-    ]
-    for rel in current_release_docs:
-        text = (ROOT / rel).read_text(encoding="utf-8")
-        require(EXPECTED_VERSION in text, f"current-release documentation missing {EXPECTED_VERSION}: {rel}")
-        for pattern in release_coordinate_patterns:
-            stale = sorted({match.group(1) for match in pattern.finditer(text) if match.group(1) != EXPECTED_VERSION})
-            require(not stale, f"stale release coordinates in {rel}: {stale}")
+    # Source identity and latest published release are intentionally distinct while
+    # 0.2.7 is being prepared. Build/development docs follow EXPECTED_VERSION;
+    # install docs keep pointing at the latest real tag until the new tag exists.
+    source_docs = {
+        "docs/OPERATIONS.md": [f"source version `{EXPECTED_VERSION}`"],
+        "site/Development.md": [
+            f"sage-plugin-v{EXPECTED_VERSION}.zip",
+            f"sage_agent_protocol-{EXPECTED_VERSION}-py3-none-any.whl",
+            f"sage-hermes-plugin-v{EXPECTED_VERSION}.zip",
+            f"sage-agent-openclaw-sage-{EXPECTED_VERSION}.tgz",
+        ],
+    }
+    for rel, markers in source_docs.items():
+        doc = (ROOT / rel).read_text(encoding="utf-8")
+        for marker in markers:
+            require(marker in doc, f"source-version documentation drift in {rel}: {marker}")
+
+    tagged_docs = ["docs/GETTING_STARTED.md", "site/CLI-Tools.md", "site/Quickstart.md"]
+    for rel in tagged_docs:
+        doc = (ROOT / rel).read_text(encoding="utf-8")
+        require(LATEST_TAGGED_VERSION in doc, f"latest-tag documentation drift in {rel}")
+
+    adapters_doc = (ROOT / "site/Adapters.md").read_text(encoding="utf-8")
+    require(f'version: "{EXPECTED_VERSION}"' in adapters_doc, "Adapters source manifest version drift")
+    require(f"v{LATEST_TAGGED_VERSION}" in adapters_doc, "Adapters latest-tag install note missing")
 
     license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
+    require(project.get("license", {}).get("text") == "AGPL-3.0-or-later", "pyproject license metadata drift")
     require("SAGE Dual License" in license_text, "dual-license preamble missing")
+    require("SPDX: AGPL-3.0-or-later" in license_text, "AGPL-or-later selection missing")
     require("GNU AFFERO GENERAL PUBLIC LICENSE" in license_text, "AGPL license text missing")
     require("sage@digitalacre.org" in license_text, "commercial license contact missing")
+    require((ROOT / "CONTRIBUTOR_LICENSE_AGREEMENT.md").is_file(), "contributor license agreement missing")
+    contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    require("CONTRIBUTOR_LICENSE_AGREEMENT.md" in contributing, "CONTRIBUTING does not reference CLA")
+    pr_template = (ROOT / ".github/PULL_REQUEST_TEMPLATE.md").read_text(encoding="utf-8")
+    require("Contributor License Agreement" in pr_template, "pull-request CLA acknowledgement missing")
 
     openclaw_pkg = load_json("integrations/openclaw/package.json")
     openclaw_manifest = load_json("integrations/openclaw/openclaw.plugin.json")
@@ -115,6 +128,8 @@ def main() -> None:
     require(openclaw_pkg.get("license") == "AGPL-3.0-or-later", "OpenClaw license metadata drift")
     require(openclaw_pkg["repository"]["url"] == f"git+{EXPECTED_REPOSITORY}.git", "OpenClaw repository drift")
     require(openclaw_manifest["version"] == EXPECTED_VERSION, "OpenClaw manifest version drift")
+    require((ROOT / "integrations/openclaw/LICENSE").read_bytes() == (ROOT / "LICENSE").read_bytes(), "OpenClaw license payload drift")
+    require((ROOT / "integrations/hermes/LICENSE").read_bytes() == (ROOT / "LICENSE").read_bytes(), "Hermes license payload drift")
 
     hermes_yaml = (ROOT / "integrations/hermes/sage/plugin.yaml").read_text(encoding="utf-8")
     require(re.search(rf'^version:\s*["\']?{re.escape(EXPECTED_VERSION)}["\']?\s*$', hermes_yaml, re.MULTILINE) is not None, "Hermes manifest version drift")
@@ -162,8 +177,8 @@ def main() -> None:
         "integrations/hermes/sage/__init__.py",
         "integrations/hermes/sage/plugin.yaml",
         "docs/GETTING_STARTED.md",
-        "integrations/openclaw/dist/index.js",
-        "integrations/openclaw/dist/conformance.js",
+        "integrations/openclaw/src/index.ts",
+        "integrations/openclaw/src/conformance.ts",
         "integrations/openclaw/tck/core.json",
         "integrations/openclaw/package.json",
         "integrations/openclaw/openclaw.plugin.json",

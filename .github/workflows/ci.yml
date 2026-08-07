@@ -128,7 +128,7 @@ jobs:
       - run: node scripts/openclaw_adapter_check.mjs
       - run: npm pack --ignore-scripts
         working-directory: integrations/openclaw
-      - run: python ../../scripts/package_check.py --openclaw sage-agent-openclaw-sage-0.2.6.tgz
+      - run: python ../../scripts/package_check.py --openclaw sage-agent-openclaw-sage-0.2.7.tgz
         working-directory: integrations/openclaw
 
   package:
@@ -161,9 +161,9 @@ jobs:
       - run: python scripts/build_release.py --output dist --skip-openclaw
       - run: |
           python scripts/package_check.py \
-            --source dist/sage-plugin-v0.2.6.zip \
-            --wheel dist/sage_agent_protocol-0.2.6-py3-none-any.whl \
-            --hermes dist/sage-hermes-plugin-v0.2.6.zip
+            --source dist/sage-plugin-v0.2.7.zip \
+            --wheel dist/sage_agent_protocol-0.2.7-py3-none-any.whl \
+            --hermes dist/sage-hermes-plugin-v0.2.7.zip
       - run: docker build -t sage-agent-protocol:test .
 
 
