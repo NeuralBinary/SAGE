@@ -27,7 +27,7 @@ dependencies = [
   "msgpack>=1.2.1,<2",
   "httpx>=0.28.1,<1",
   "prometheus-client>=0.25,<1",
-  "cryptography>=49,<50",
+  "cryptography>=49,<51",
 ]
 
 [project.urls]
