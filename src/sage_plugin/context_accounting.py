@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SAGE is dual-licensed under AGPL-3.0 and a commercial license.
+# Contact sage@digitalacre.org for commercial licensing.
 """Additive context-accounting instrumentation for the SAGE codec.
 
 This module implements Stage 1 of the semantic-context-compression benchmark

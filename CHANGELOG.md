@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.7
+
+- **License Change:** SAGE is now dual-licensed under AGPL-3.0 and a commercial license.
+  The MIT license was used for versions 0.2.6 and earlier. See LICENSE and COMMERCIAL.md
+  for details.
+
+- **New Files:** Added COMMERCIAL.md explaining the commercial licensing terms and
+  .github/FUNDING.yml for GitHub Sponsors.
+
+- **Updated:** CONTRIBUTING.md now reflects the dual-licensing terms for contributors.
+
 ## 0.2.6
 
 - Patch release over 0.2.5. Protocol `sage/0.2`, wire version `2`, migration baseline `0001_sage_0_2`, and the 13 normative TCK vectors are unchanged.

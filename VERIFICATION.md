@@ -13,6 +13,7 @@
 | Protocol | sage/0.2 |
 | Wire | 2 |
 | Database baseline | 0001_sage_0_2 |
+| License | AGPL-3.0 + Commercial (dual-license) |
 
 This report records qualification of the clean v0.2 first-deployment baseline on July 31, 2026. No pre-v0.2 protocol reader, compatibility layer, or migration chain is shipped.
 
@@ -461,3 +462,12 @@ The extracted source passes a 100-iteration latency gate with p95 values of 16.5
 The extracted source independently rebuilds both distribution formats. `scripts/package_check.py` passes against the archive-built Python wheel and OpenClaw package. The source archive retains `integrations/openclaw/dist/index.js`, `integrations/openclaw/dist/conformance.js`, and the OpenClaw TCK while excluding runtime databases, bytecode, cache directories, dependency directories, nested distribution archives, and top-level build output.
 
 All locally executable v0.2 gates therefore pass both in the finalized working tree and in an independently extracted source archive. This report distinguishes locally executed qualification from CI-configured qualification and does not claim that undiscovered defects are impossible.
+
+## License verification
+
+SAGE v0.2.7 and later are dual-licensed under AGPL-3.0 and a commercial license
+offered by NeuralBinary. Versions 0.2.6 and earlier were released under the MIT
+license.
+
+The LICENSE file contains the full AGPL-3.0 text with the dual-license preamble.
+Commercial licensing inquiries should be directed to sage@neuralbinary.com.

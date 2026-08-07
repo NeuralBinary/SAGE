@@ -65,5 +65,17 @@ Keep pull requests focused. Explain the problem, the chosen behavior, compatibil
 impact, and the verification performed. Reviewers may ask for additional cross-runtime TCK,
 failure-mode, concurrency, or migration evidence when the affected boundary warrants it.
 
-By contributing, you agree that your contribution is licensed under the repository's MIT
-License and that participation follows [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+By contributing, you agree that your contribution is licensed under the same dual-licensing
+terms as the project:
+
+1. **AGPL-3.0** — For open source use
+2. **Commercial License** — For proprietary use (sold by NeuralBinary)
+
+This allows SAGE to remain fully open source while providing a sustainable path for
+continued development through commercial licensing. Your copyright is retained; you're
+simply granting permission for your work to be distributed under both licenses.
+
+If you have questions about this, please open an issue or contact us at
+sage@neuralbinary.com before contributing.
+
+Participation also follows [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).

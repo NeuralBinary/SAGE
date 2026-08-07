@@ -12,7 +12,7 @@ SAGE is a vendor-neutral semantic communication runtime and durable context bus 
 | Package version | 0.2.6 |
 | Protocol | `sage/0.2` |
 | Wire | `2` |
-| License | MIT |
+| License | AGPL-3.0 + Commercial (dual-license) |
 
 SAGE core is independent of model providers and agent frameworks. Native and protocol adapters connect the same runtime to Hermes, OpenClaw, Claude, OpenAI, A2A, MCP, REST, Python, and custom orchestrators.
 
@@ -509,14 +509,28 @@ scripts/                  release, performance, schema, and verification tools
 
 ## License and attribution
 
-SAGE is licensed under the MIT License.
+SAGE is dual-licensed:
+
+- **AGPL-3.0** — Free for open source projects, research, and community use.
+  Anyone can use, modify, and distribute SAGE as long as they release their
+  changes under the same license. This ensures the community benefits from
+  improvements. [Learn more about AGPL](https://www.gnu.org/licenses/agpl-3.0.en.html)
+
+- **Commercial License** — For organizations that want to use SAGE in proprietary
+  products, closed-source services, or SaaS offerings without the AGPL's
+  source-disclosure requirements. Contact **sage@neuralbinary.com** for pricing
+  and terms.
+
+This is the same dual-licensing model used by Grafana, Cal.com, GitLab, Mattermost,
+and many other successful open source projects. It allows SAGE to remain fully
+open source while providing a sustainable path for continued development.
+
+---
+
+**Author:** NeuralBinary
+**Credits:** @NeuralBinary, @ro0ti
+**Repository:** https://github.com/NeuralBinary/SAGE
 
 Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md),
 [SECURITY.md](SECURITY.md), [SUPPORT.md](SUPPORT.md), and
 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
-
-Author: NeuralBinary
-
-Credits: @NeuralBinary, @ro0ti
-
-Repository: https://github.com/NeuralBinary/SAGE
