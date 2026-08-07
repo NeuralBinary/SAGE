@@ -103,14 +103,16 @@ def main() -> None:
             require(not stale, f"stale release coordinates in {rel}: {stale}")
 
     license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
-    require("Copyright (c) 2026 NeuralBinary" in license_text, "license attribution drift")
+    require("SAGE Dual License" in license_text, "dual-license preamble missing")
+    require("GNU AFFERO GENERAL PUBLIC LICENSE" in license_text, "AGPL license text missing")
+    require("sage@digitalacre.org" in license_text, "commercial license contact missing")
 
     openclaw_pkg = load_json("integrations/openclaw/package.json")
     openclaw_manifest = load_json("integrations/openclaw/openclaw.plugin.json")
     require(openclaw_pkg["version"] == EXPECTED_VERSION, "OpenClaw package version drift")
     require(openclaw_pkg["author"] == EXPECTED_AUTHOR, "OpenClaw author drift")
     require(openclaw_pkg["contributors"] == ["NeuralBinary", "ro0ti"], "OpenClaw credits drift")
-    require(openclaw_pkg.get("license") == "MIT", "OpenClaw license metadata drift")
+    require(openclaw_pkg.get("license") == "AGPL-3.0-or-later", "OpenClaw license metadata drift")
     require(openclaw_pkg["repository"]["url"] == f"git+{EXPECTED_REPOSITORY}.git", "OpenClaw repository drift")
     require(openclaw_manifest["version"] == EXPECTED_VERSION, "OpenClaw manifest version drift")
 

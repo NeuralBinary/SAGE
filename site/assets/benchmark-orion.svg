@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 430" role="img" aria-labelledby="title desc">
+  <title id="title">SAGE held-out Orion wire benchmark</title>
+  <desc id="desc">Full context uses 2626 JSON wire bytes. Frozen SAGE codebooks use 1607 bytes, 38.8 percent less. Frozen SAGE codebooks plus learned patterns use 1450 bytes, 44.8 percent less. Oracle rows are shown separately as upper bounds.</desc>
+  <style>
+    .text { font: 15px system-ui, -apple-system, Segoe UI, sans-serif; fill: #111827; }
+    .small { font: 13px system-ui, -apple-system, Segoe UI, sans-serif; fill: #4b5563; }
+    .bar { fill: #4f46e5; }
+    .oracle { fill: #9ca3af; }
+    .grid { stroke: #e5e7eb; stroke-width: 1; }
+    @media (prefers-color-scheme: dark) {
+      .text { fill: #f9fafb; }
+      .small { fill: #d1d5db; }
+      .grid { stroke: #374151; }
+      .oracle { fill: #6b7280; }
+    }
+  </style>
+  <text class="text" x="0" y="24" font-weight="700">Held-out Orion: cumulative JSON wire bytes across six turns</text>
+  <text class="small" x="0" y="48">Lower is better. Frozen rows are the primary unseen-data wire measurement; oracle rows are upper bounds.</text>
+  <line class="grid" x1="260" y1="72" x2="260" y2="390"/>
+  <line class="grid" x1="430" y1="72" x2="430" y2="390"/>
+  <line class="grid" x1="600" y1="72" x2="600" y2="390"/>
+  <line class="grid" x1="770" y1="72" x2="770" y2="390"/>
+
+  <text class="text" x="0" y="108">Full context</text>
+  <rect class="bar" x="260" y="88" width="600" height="28" rx="5"/>
+  <text class="text" x="870" y="108" text-anchor="end">2,626 B</text>
+
+  <text class="text" x="0" y="168">v09 codebooks — frozen</text>
+  <rect class="bar" x="260" y="148" width="367" height="28" rx="5"/>
+  <text class="text" x="642" y="168">1,607 B · 38.8% less</text>
+
+  <text class="text" x="0" y="228">v10 + patterns — frozen</text>
+  <rect class="bar" x="260" y="208" width="331" height="28" rx="5"/>
+  <text class="text" x="606" y="228">1,450 B · 44.8% less</text>
+
+  <text class="text" x="0" y="308">v09 codebooks — oracle</text>
+  <rect class="oracle" x="260" y="288" width="285" height="28" rx="5"/>
+  <text class="text" x="560" y="308">1,248 B · 52.5% less</text>
+
+  <text class="text" x="0" y="368">v10 + patterns — oracle</text>
+  <rect class="oracle" x="260" y="348" width="324" height="28" rx="5"/>
+  <text class="text" x="599" y="368">1,417 B · 46.0% less</text>
+
+  <text class="small" x="260" y="414">Measured against the v0.2.6 held-out Orion fixture. Oracle = codebook allowed to see held-out material.</text>
+</svg>

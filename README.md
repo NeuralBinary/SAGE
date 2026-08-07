@@ -12,7 +12,7 @@ SAGE is a vendor-neutral semantic communication runtime and durable context bus 
 | Package version | 0.2.6 |
 | Protocol | `sage/0.2` |
 | Wire | `2` |
-| License | AGPL-3.0 + Commercial (dual-license) |
+| Source license (`main`) | AGPL-3.0 + Commercial (dual-license) |
 
 SAGE core is independent of model providers and agent frameworks. Native and protocol adapters connect the same runtime to Hermes, OpenClaw, Claude, OpenAI, A2A, MCP, REST, Python, and custom orchestrators.
 
@@ -39,6 +39,7 @@ SAGE core is independent of model providers and agent frameworks. Native and pro
 - [Security](#security)
 - [Observability](#observability)
 - [Verification](#verification)
+  - [Benchmark highlights](#benchmark-highlights)
 - [Development](#development)
 - [Release process](#release-process)
 - [Repository structure](#repository-structure)
@@ -393,41 +394,19 @@ The current verification record is `VERIFICATION.md`. A generated release report
 
 Task-economics research uses the JSONL corpus format in `sage_plugin.corpus` and `scripts/model_matrix_benchmark.py`. Provider/model measurements must come from configured external runtimes; SAGE does not manufacture token, cost, latency, or task-success results when those runtimes are unavailable.
 
-### Semantic context compression benchmark
+### Benchmark highlights
 
-`scripts/compression_benchmark.py` measures how twelve context-compression strategies (the RFC "Phoenix" variants) carry a fixed six-turn conversation, separating three compression levels:
+SAGE keeps benchmark claims separated by evidence type. The fixed Phoenix fixture is the deterministic codec regression benchmark; the held-out Orion split freezes the codebook before unseen updates are revealed; provider-backed task/cost/latency measurements are published only when an external model adapter actually runs.
 
-- **transport compression** — wire bytes actually transmitted (canonical JSON and MessagePack),
-- **model-visible compression** — the tokens the receiver model must consume (input/output of the transmitted representation),
-- **semantic compression** — downstream task success, state reconstruction, and per-fact-type fidelity against an embedded ground-truth answer key.
+| Scenario | Variant | Evidence | JSON wire bytes | vs full context | Task / fidelity |
+| --- | --- | --- | ---: | ---: | --- |
+| Phoenix | **v09 SAGE codebooks** | deterministic | **1,172 vs 2,027** | **42.2% less** | task 1.00; all fidelity checks 1.00 |
+| Orion | **v09 SAGE codebooks** | frozen held-out wire | **1,607 vs 2,626** | **38.8% less** | provider-backed frozen score pending |
+| Orion | **v10 SAGE + learned patterns** | frozen held-out wire | **1,450 vs 2,626** | **44.8% less** | provider-backed frozen score pending |
 
-Variants 1–8 are plain serialization/string strategies; variants 9–12 run the real `SageCodec` (codebooks only; codebooks + learned patterns; references + state deltas; full SAGE with ACKed receiver knowledge). The benchmark is fully deterministic: no RNG, no wall-clock output, a fixed timestamp, pinned packet ids, and an isolated scratch database per variant.
+The Phoenix v09 result includes a 675-byte codebook setup cost and reaches break-even after five uses on that fixture. Orion's frozen rows are the primary unseen-data wire measurements; oracle rows are upper bounds and are not used as the headline. Missing provider/model measurements remain `not run, no provider` rather than being estimated.
 
-Honest headline from the deterministic run (all numbers reproducible locally, see below): the SAGE codebook variant (v09) carries the full conversation in **1,172 wire bytes vs 2,027 for the full-context baseline (v01) — about 42% less wire — with full semantic fidelity (task success 1.0, all fidelity checks 1.0)**. Its amortization break-even is 5 uses: the 675-byte codebook setup is repaid after five exchanges of this fixture. Adding learned patterns (v10) costs more setup (946 bytes, break-even 9) and saves less per use on a conversation this short; the reference/delta (v11) and ACKed-knowledge (v12) variants post negative per-use savings (break-even equals setup cost, i.e. they do not break even within the fixture). Patterns amortize over longer conversations than this fixture shows — the benchmark measures the RFC's "shared shorthand may initially cost more" question honestly rather than manufacturing a win. The ACKed-knowledge rows are honest that this short fixture cannot repay receiver-knowledge setup.
-
-Run it (deterministic, no provider required):
-
-```bash
-uv run --with '.[dev,mcp]' python scripts/compression_benchmark.py            # printed tables
-uv run --with '.[dev,mcp]' python scripts/compression_benchmark.py --out DIR  # + JSON/CSV artifacts
-```
-
-The model-evaluation harness (`scripts/model_eval_harness.py`) measures the same variants' downstream task success on real model runtimes through configured external adapters — cold vs warm receivers, at least two distinct model families, and the RFC's six-column public result table. It requires an `--adapters` config (see its module docstring) and `SAGE_BENCH_LLM_PROVIDER`; with neither it prints `not run, no provider` and exits 0 — provider numbers are never fabricated. With `--record-feedback` it also records each SAGE variant's measured task success into the codec's pattern store (`PatternStore.record_feedback`, `runtime.feedback` semantics) as an additive `feedback` JSON summary key, with zero wire-byte change. Raw artifacts are written outside the repository.
-
-```bash
-SAGE_BENCH_LLM_PROVIDER=fake uv run --with '.[dev,mcp]' \
-    python scripts/model_eval_harness.py --adapters adapters.json --output /path/outside/repo
-```
-
-The harness also ships a sealed evaluation mode (issue #22): with `--sealed`
-the adapter sees only the compact packet — never source content or answer
-keys — scores are computed harness-side against the private answer key, and
-`--held-out` evaluates the SAGE variants on unseen conversations with a frozen
-codebook and a lifecycle-primed warm receiver. See the
-[Benchmark page](https://neuralbinary.github.io/SAGE/Benchmark/) of the docs
-site.
-
-No-fabrication rule: every figure in these tools is either deterministic (measured locally) or comes from a configured external runtime's reply; a missing provider is reported as `not run, no provider`, never estimated.
+Full methodology, oracle/frozen distinctions, negative rows, reproduction commands, and the sealed model boundary are documented on the [Benchmark page](https://neuralbinary.github.io/SAGE/Benchmark/).
 
 ## Development
 
@@ -509,21 +488,12 @@ scripts/                  release, performance, schema, and verification tools
 
 ## License and attribution
 
-SAGE is dual-licensed:
+The current `main` branch is dual-licensed:
 
-- **AGPL-3.0** — Free for open source projects, research, and community use.
-  Anyone can use, modify, and distribute SAGE as long as they release their
-  changes under the same license. This ensures the community benefits from
-  improvements. [Learn more about AGPL](https://www.gnu.org/licenses/agpl-3.0.en.html)
+- **AGPL-3.0-or-later** — use, modify, and redistribute SAGE under the AGPL terms in [LICENSE](LICENSE).
+- **Commercial License** — use SAGE under separate commercial terms for proprietary products, closed-source services, or other deployments where AGPL terms are not suitable. See [COMMERCIAL.md](COMMERCIAL.md) or contact **sage@digitalacre.org**.
 
-- **Commercial License** — For organizations that want to use SAGE in proprietary
-  products, closed-source services, or SaaS offerings without the AGPL's
-  source-disclosure requirements. Contact **sage@digitalacre.org** for pricing
-  and terms.
-
-This is the same dual-licensing model used by Grafana, Cal.com, GitLab, Mattermost,
-and many other successful open source projects. It allows SAGE to remain fully
-open source while providing a sustainable path for continued development.
+Tagged releases **v0.2.6 and earlier remain under the MIT license** as recorded in [CHANGELOG.md](CHANGELOG.md) and [VERIFICATION.md](VERIFICATION.md). The dual-license change applies to the current source line and subsequent releases.
 
 ---
 

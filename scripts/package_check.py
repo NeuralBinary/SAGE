@@ -163,7 +163,7 @@ def check_openclaw(path: Path) -> dict[str, object]:
         require(package.get("version") == VERSION, "OpenClaw version drift")
         require(package.get("author") == AUTHOR, "OpenClaw author drift")
         require(package.get("contributors") == ["NeuralBinary", "ro0ti"], "OpenClaw credits drift")
-        require(package.get("license") == "MIT", "OpenClaw license metadata missing")
+        require(package.get("license") == "AGPL-3.0-or-later", "OpenClaw license metadata drift")
     return {"openclaw": path.name, "entries": len(names), "ok": True}
 
 

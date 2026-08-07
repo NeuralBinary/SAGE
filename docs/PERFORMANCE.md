@@ -106,17 +106,13 @@ Release analysis should compare raw context, caller-supplied retrieval/summary s
 
 ## Semantic context compression benchmark and model evaluation harness
 
-The deterministic compression benchmark (`scripts/compression_benchmark.py`) separates transport, model-visible, and semantic compression for the twelve RFC "Phoenix" variants over a fixed six-turn conversation. It is fully deterministic (no RNG, fixed timestamp, pinned packet ids, isolated per-variant scratch database) and requires no provider. Its honest headline, reproducible with `uv run --with '.[dev,mcp]' python scripts/compression_benchmark.py`:
+Performance reporting follows the same evidence hierarchy as the public Benchmark page:
 
-- v09 SAGE codebooks: 1,172 wire bytes vs 2,027 baseline (v01) — about 42% less wire — with full fidelity (task success 1.0, all per-fact-type fidelity checks 1.0); codebook setup 675 bytes, break-even 5 uses.
-- v10 codebooks + learned patterns: 1,341 wire bytes, setup 946 bytes, break-even 9 — the pattern's setup exceeds this short fixture's repayment horizon.
-- v11 references + state deltas and v12 ACKed receiver knowledge: negative per-use savings on this fixture (break-even equals setup cost, i.e. no break-even within six turns). These rows are deliberately honest about the short fixture; pattern amortization is a longer-conversation effect.
+1. **Phoenix deterministic regression benchmark** — local, provider-free codec/task/fidelity measurements. v09 records 1,172 JSON wire bytes vs 2,027 for full context (42.2% less), 296 vs 509 model-input tokens, task success 1.00, and 1.00 across every benchmark fidelity category. Codebook setup is 675 bytes with a five-use break-even on the fixture.
+2. **Orion frozen held-out wire measurement** — the codebook is fixed before unseen updates. v09 records 1,607 bytes vs 2,626 full context (38.8% less); v10 records 1,450 bytes (44.8% less). Frozen codec-only rows intentionally leave downstream task/fidelity unset until the sealed model harness evaluates the model response.
+3. **Provider-backed sealed evaluation** — real-model task accuracy, critical-fact recall, input/output tokens, provider cost, and latency. These values are emitted only by configured external adapters; no provider means `not run, no provider`.
 
-The model-evaluation harness (`scripts/model_eval_harness.py`, issue #16 stage 3) measures the same variants' downstream task success on real model runtimes through configured external adapters:
+Oracle held-out rows remain useful as upper bounds but must stay labeled separately from frozen measurements. A smaller representation that changes required downstream behavior is a regression regardless of byte reduction.
 
-- cold vs warm receivers (warm = ACKed shared context prior), both reported, plus warm-vs-cold deltas;
-- at least two distinct model families (config gate) and the RFC's six-column public result table (`| Variant | Wire bytes | Input tokens | Total cost | Task accuracy | Critical-fact recall |`);
-- decoder-assisted mode counts expansion tokens in `input_tokens` (RFC "prevent hidden decompression costs"): decoding-step tokens are always counted, a conservative upper bound when the adapter already bills the expanded text;
-- deterministic artifacts (byte-identical across runs modulo the measured per-adapter-call `latency_ms`); no provider configured means `not run, no provider`, exit 0 — provider numbers are never fabricated.
+See the public [`site/Benchmark.md`](../site/Benchmark.md) page for the result tables, methodology, sealed boundary, held-out split, warm lifecycle, and reproduction commands.
 
-Stage 4 closes the feedback loop: `--record-feedback` records each SAGE variant's measured task success (the mean of the adapter-reported `task_success` for that variant's rows) into the codec's pattern store through the existing `PatternStore.record_feedback` path — mirroring `runtime.feedback` semantics (`task_success` validated to `[0, 1]`, `KeyError` on an unknown packet id, decisions from the `MessageAudit` rows the real encodes created). The result is an additive top-level `feedback` JSON key in the artifact (patterns updated, `task_utility`/`utility_score` before and after per pattern), with zero wire-byte change: feedback is post-hoc database bookkeeping and never touches encode. Default OFF keeps artifacts byte-identical to a run without the flag.

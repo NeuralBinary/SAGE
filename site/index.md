@@ -15,7 +15,7 @@ SAGE core is independent of model providers and agent frameworks. Native and pro
 | Package version | 0.2.6 |
 | Protocol | `sage/0.2` |
 | Wire version | `2` |
-| License | AGPL-3.0 + Commercial (dual-license) |
+| Source license (`main`) | AGPL-3.0 + Commercial (dual-license) |
 
 ## Key capabilities
 
@@ -34,12 +34,25 @@ SAGE core is independent of model providers and agent frameworks. Native and pro
 - [Quickstart](Quickstart.md) — install the v0.2.6 release, run the service, Docker quickstart, Hermes and OpenClaw plugins
 - [Configuration](Configuration.md) — full environment-variable reference and production rules
 - [Architecture](Architecture.md) — semantic bus, references, deltas, patterns, adapters, deployment topology
+- [Benchmark](Benchmark.md) — deterministic Phoenix results, frozen held-out Orion measurements, and sealed model evaluation
 - [Protocol](Protocol.md) — the `sage/0.2` wire protocol, canonical encoding, TCK, delivery semantics
 - [CLI-Tools](CLI-Tools.md) — the 12 console scripts shipped with the wheel
 - [Adapters](Adapters.md) — Hermes and OpenClaw plugin integration
 - [Development](Development.md) — repo layout, tests, checks, building a release, CI
 - [Production](Production.md) — Compose topologies, TLS, migrations, containers, monitoring
 - [FAQ](FAQ.md) — common questions
+
+## Benchmark snapshot
+
+SAGE reports benchmark results by evidence type instead of collapsing wire reduction, deterministic fidelity, and external-model performance into one number.
+
+| Scenario | Result | Evidence |
+| --- | --- | --- |
+| Phoenix deterministic | **v09: 1,172 vs 2,027 JSON wire bytes (42.2% less)** with task success 1.00 and all benchmark fidelity checks 1.00 | local deterministic codec benchmark |
+| Orion held-out | **v09 frozen: 1,607 vs 2,626 bytes (38.8% less)** | unseen-data wire measurement; downstream provider score pending |
+| Orion held-out | **v10 frozen: 1,450 vs 2,626 bytes (44.8% less)** | unseen-data wire measurement; downstream provider score pending |
+
+Oracle held-out rows are documented as upper bounds, not headline measurements. Real-model task accuracy, provider cost, and latency are published only when configured external adapters run. See [Benchmark](Benchmark.md) for methodology and reproduction commands.
 
 ## Current release: v0.2.6
 
@@ -76,10 +89,12 @@ The repository ships a verification record (`VERIFICATION.md` in the repo root).
 
 ## License and attribution
 
-SAGE is dual-licensed:
+The current `main` branch is dual-licensed:
 
-- **AGPL-3.0** — Free for open source projects, research, and community use, subject to the terms in the repository [LICENSE](https://github.com/NeuralBinary/SAGE/blob/main/LICENSE).
-- **Commercial License** — For organizations that want to use SAGE in proprietary products, closed-source services, or SaaS offerings without the AGPL's source-disclosure requirements. See [COMMERCIAL.md](https://github.com/NeuralBinary/SAGE/blob/main/COMMERCIAL.md) or contact **sage@digitalacre.org**.
+- **AGPL-3.0-or-later** — use, modify, and redistribute SAGE under the terms in the repository [LICENSE](https://github.com/NeuralBinary/SAGE/blob/main/LICENSE).
+- **Commercial License** — separate terms are available for proprietary products, closed-source services, and other deployments where AGPL terms are not suitable. See [COMMERCIAL.md](https://github.com/NeuralBinary/SAGE/blob/main/COMMERCIAL.md) or contact **sage@digitalacre.org**.
+
+Tagged releases **v0.2.6 and earlier remain MIT-licensed** as recorded in the repository changelog and verification record. The dual-license change applies to the current source line and subsequent releases.
 
 Author: NeuralBinary. Credits: @NeuralBinary, @ro0ti.
 
