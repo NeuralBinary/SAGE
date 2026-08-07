@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -18,6 +18,7 @@ from .schemas import (
     ConceptDeprecateRequest,
     ConceptRegisterRequest,
     ConceptResponse,
+    MemoryTier,
     RefGrantRequest,
     RefPolicyRequest,
     ResolveRequest,
@@ -58,7 +59,13 @@ def store_ref(req: StoreRequest, db: Session = Depends(get_db)) -> StoreResponse
     grant = ReferenceStore(db, settings).grant_metadata(item.id, actor=req.owner, workspace=req.workspace, privileged=current_principal().is_service)
     db.commit()
     expires = grant.expires_at.isoformat() if grant.expires_at else None
-    return StoreResponse(ref=item.id, byte_size=item.byte_size, tier=grant.tier, encrypted=item.ciphertext is not None, expires_at=expires)
+    return StoreResponse(
+        ref=item.id,
+        byte_size=item.byte_size,
+        tier=cast(MemoryTier, grant.tier),
+        encrypted=item.ciphertext is not None,
+        expires_at=expires,
+    )
 
 @router.post("/refs/resolve")
 def resolve_ref(req: ResolveRequest, db: Session = Depends(get_db)) -> dict[str, Any]:

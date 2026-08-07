@@ -4,9 +4,9 @@ install:
 test:
 	pytest -q
 coverage:
-	pytest -q --cov=sage_plugin --cov-report=term-missing --cov-fail-under=70
+	pytest -q --cov=sage_plugin --cov-report=term-missing --cov-fail-under=80
 typecheck:
-	mypy src/sage_plugin/compiler.py src/sage_plugin/config.py src/sage_plugin/schemas.py src/sage_plugin/protocol_spec.py src/sage_plugin/spec_models.py src/sage_plugin/conformance.py src/sage_plugin/context_accounting.py src/sage_plugin/security.py src/sage_plugin/wire_codec.py src/sage_plugin/semantic_safety.py src/sage_plugin/signing.py
+	mypy src/sage_plugin
 lint:
 	ruff check src tests scripts
 security:
@@ -15,7 +15,7 @@ performance:
 	PYTHONPATH=src python scripts/performance_check.py --iterations 200
 	PYTHONPATH=src python -m sage_plugin.qualification --profile-encode --profile-iterations 30 --max-query-count 40
 clean:
-	rm -rf .pytest_cache .ruff_cache .mypy_cache src/*.egg-info build dist
+	rm -rf .coverage .pytest_cache .ruff_cache .mypy_cache src/*.egg-info build dist
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
 verify:
 	python scripts/security_check.py

@@ -16,12 +16,12 @@ def _store(tmp_path, name: str):
         connect_args={"check_same_thread": False},
     )
     Base.metadata.create_all(engine)
-    return sessionmaker(bind=engine, expire_on_commit=False)
+    return engine, sessionmaker(bind=engine, expire_on_commit=False)
 
 
 def test_concurrent_ensure_creates_single_row(tmp_path):
     """Concurrent ensure() must not raise IntegrityError on the unique constraint."""
-    Session = _store(tmp_path, "ensure.db")
+    engine, Session = _store(tmp_path, "ensure.db")
     errors: list[Exception] = []
 
     def worker() -> None:
@@ -38,11 +38,12 @@ def test_concurrent_ensure_creates_single_row(tmp_path):
     with Session() as db:
         count = db.scalar(select(func.count()).select_from(ReceiverKnowledge))
         assert count == 1
+    engine.dispose()
 
 
 def test_concurrent_add_value_creates_single_item(tmp_path):
     """Concurrent _add_value() must not raise IntegrityError for the same item."""
-    Session = _store(tmp_path, "items.db")
+    engine, Session = _store(tmp_path, "items.db")
     errors: list[Exception] = []
 
     def worker() -> None:
@@ -66,3 +67,4 @@ def test_concurrent_add_value_creates_single_item(tmp_path):
         assert count == 1
         item = db.scalar(select(ReceiverKnowledgeItem))
         assert item is not None and item.confidence == 0.9
+    engine.dispose()

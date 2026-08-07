@@ -122,10 +122,11 @@ def bus_context(
     partition: str | None = Query(default=None, pattern=r"^p[0-9]{4}$"),
     db: Session = Depends(get_db),
 ) -> list[BusContextItem]:
-    receiver = enforce_agent_scope(actor=receiver, workspace=workspace)
+    scoped_receiver = enforce_agent_scope(actor=receiver, workspace=workspace)
+    assert scoped_receiver is not None
     bus = SemanticBus(db, settings)
     items = bus.pull(
-        receiver=receiver,
+        receiver=scoped_receiver,
         workspace=workspace,
         limit=limit,
         claim=True,
@@ -137,7 +138,7 @@ def bus_context(
         decoded = bus.codec.decode(
             bus.codec.expand(item.wire),
             False,
-            receiver=receiver,
+            receiver=scoped_receiver,
             workspace=workspace,
             acknowledge=False,
         )
@@ -171,6 +172,7 @@ def bus_ack_batch(
     req: BusBatchAckRequest, db: Session = Depends(get_db)
 ) -> list[BusMessageResponse]:
     receiver = enforce_agent_scope(actor=req.receiver, workspace=req.workspace)
+    assert receiver is not None
     bus = SemanticBus(db, settings)
     items = []
     try:

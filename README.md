@@ -387,7 +387,7 @@ See `docs/OPERATIONS.md` and `docs/ARCHITECTURE.md`.
 
 ## Verification
 
-The repository verification process covers unit/integration behavior with a 70% source-coverage floor, strict typing across the protocol/configuration/security boundary, semantic safety, protocol conformance, malformed-wire rejection, migrations, OpenAPI construction, packaging, adapter syntax/build checks, performance regression gates, repository consistency, and artifact re-validation.
+The repository verification process covers unit/integration behavior with an 80% source-coverage floor, strict typing across the entire Python package, semantic safety, protocol conformance, malformed-wire rejection, migrations, OpenAPI construction, packaging, adapter syntax/build checks, performance regression gates, repository consistency, and artifact re-validation.
 
 The current verification record is `VERIFICATION.md`. A generated release report is provided beside the packaged artifacts during a verified build. Production-shape qualification uses `deploy/staging/compose.yml`: PostgreSQL, one migration job, three SAGE workers, TLS load balancing, end-to-end soak traffic, worker failover, database outage/readiness failure, and durable recovery.
 
@@ -510,6 +510,10 @@ scripts/                  release, performance, schema, and verification tools
 ## License and attribution
 
 SAGE is licensed under the MIT License.
+
+Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md),
+[SECURITY.md](SECURITY.md), [SUPPORT.md](SUPPORT.md), and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 Author: NeuralBinary
 

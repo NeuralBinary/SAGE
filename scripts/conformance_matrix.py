@@ -18,6 +18,8 @@ def main() -> int:
     failed = False
     for item in manifest["implementations"]:
         command = shlex.split(item["command"])
+        if command and command[0] in {"python", "python3"}:
+            command[0] = sys.executable
         try:
             proc = subprocess.run(command, cwd=root, env=env, text=True, capture_output=True, timeout=120, check=False)
             ok = proc.returncode == 0

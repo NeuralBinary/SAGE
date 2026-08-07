@@ -11,6 +11,9 @@ on:
         required: true
         default: "3600"
 
+permissions:
+  contents: read
+
 jobs:
   vocabulary:
     runs-on: ubuntu-latest

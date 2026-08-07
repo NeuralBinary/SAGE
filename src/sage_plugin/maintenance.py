@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
 from sqlalchemy import delete, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from .config import Settings
@@ -19,6 +21,12 @@ from .db_models import (
 )
 from .patterns import PatternStore
 from .reachability import reachable_states, reference_roots
+
+
+def _rowcount(result: Any | None) -> int:
+    if result is None:
+        return 0
+    return int(cast(CursorResult[Any], result).rowcount or 0)
 
 
 def cleanup(db: Session, settings: Settings) -> dict[str, int]:
@@ -61,15 +69,15 @@ def cleanup(db: Session, settings: Settings) -> dict[str, int]:
     pattern_gc = PatternStore(db, settings).garbage_collect()
     db.commit()
     return {
-        "semantic_cache_deleted": int(cache_result.rowcount or 0),
-        "expired_ref_grants_deleted": int(grant_result.rowcount or 0),
-        "orphan_refs_deleted": int(ref_result.rowcount or 0) if ref_result is not None else 0,
-        "expired_bus_messages_deleted": int(bus_expired_result.rowcount or 0),
-        "orphan_states_deleted": int(state_result.rowcount or 0) if state_result is not None else 0,
-        "acked_bus_messages_deleted": int(bus_audit_result.rowcount or 0),
-        "audit_rows_deleted": int(audit_result.rowcount or 0),
-        "pattern_candidates_deleted": int(pattern_candidate_result.rowcount or 0),
-        "idempotency_records_deleted": int(idempotency_result.rowcount or 0),
-        "quota_counters_deleted": int(quota_result.rowcount or 0),
+        "semantic_cache_deleted": _rowcount(cache_result),
+        "expired_ref_grants_deleted": _rowcount(grant_result),
+        "orphan_refs_deleted": _rowcount(ref_result),
+        "expired_bus_messages_deleted": _rowcount(bus_expired_result),
+        "orphan_states_deleted": _rowcount(state_result),
+        "acked_bus_messages_deleted": _rowcount(bus_audit_result),
+        "audit_rows_deleted": _rowcount(audit_result),
+        "pattern_candidates_deleted": _rowcount(pattern_candidate_result),
+        "idempotency_records_deleted": _rowcount(idempotency_result),
+        "quota_counters_deleted": _rowcount(quota_result),
         **pattern_gc,
     }

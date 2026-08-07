@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import uuid
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any, Protocol
 
@@ -14,7 +15,14 @@ from . import __version__
 
 
 class HttpClient(Protocol):
-    def request(self, method: str, url: str, **kwargs: Any) -> httpx.Response: ...
+    def request(
+        self,
+        method: str,
+        url: str,
+        *,
+        json: Any | None = None,
+        params: Mapping[str, Any] | None = None,
+    ) -> httpx.Response: ...
 
 
 @dataclass(frozen=True)

@@ -24,7 +24,8 @@ from .codec import SageCodec
 from .config import Settings
 from .db import Base
 from .db_models import BusMessage, LearnedPattern, PatternCandidate, PatternSourceEvidence
-from .patterns import PatternStore, pattern_signature
+from .pattern_structure import pattern_signature
+from .patterns import PatternStore
 from .schemas import EncodeRequest
 
 

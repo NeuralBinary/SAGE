@@ -33,7 +33,7 @@ EXCLUDED_PARTS = {
     "build",
     "node_modules",
 }
-EXCLUDED_NAMES = {".env", "sage.db", "ci-migration.db"}
+EXCLUDED_NAMES = {".coverage", ".env", "sage.db", "ci-migration.db"}
 
 
 def _epoch() -> int:
@@ -150,12 +150,20 @@ def build_openclaw(root: Path, output: Path, epoch: int) -> Path:
     integration = root / "integrations" / "openclaw"
     env = os.environ.copy()
     env["SOURCE_DATE_EPOCH"] = str(epoch)
-    subprocess.run(
-        ["npm", "pack", "--ignore-scripts", "--pack-destination", str(output)],
-        cwd=integration,
-        env=env,
-        check=True,
-    )
+    npm = shutil.which("npm")
+    if npm is None:
+        raise RuntimeError("npm is required to build the OpenClaw release package")
+    with tempfile.TemporaryDirectory(prefix="sage-npm-cache-") as npm_cache:
+        env["npm_config_cache"] = npm_cache
+        env["npm_config_audit"] = "false"
+        env["npm_config_fund"] = "false"
+        env["npm_config_update_notifier"] = "false"
+        subprocess.run(
+            [npm, "pack", "--ignore-scripts", "--pack-destination", str(output)],
+            cwd=integration,
+            env=env,
+            check=True,
+        )
     candidates = sorted(output.glob("*.tgz"), key=lambda path: path.stat().st_mtime, reverse=True)
     if not candidates:
         raise RuntimeError("npm pack did not produce a tarball")

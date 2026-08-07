@@ -5,14 +5,16 @@ import hmac
 import json
 import logging
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC
 from typing import Any
 
 from fastapi import FastAPI, Request, Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
+from starlette.middleware.base import RequestResponseEndpoint
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from . import __version__
 from .api import router
@@ -27,10 +29,13 @@ LATENCY = Histogram("sage_http_request_seconds", "SAGE HTTP latency", ["method",
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
+build_server: Callable[[], Any] | None
 try:
-    from .mcp_server import build_server
+    from .mcp_server import build_server as _build_server
 except RuntimeError:  # pragma: no cover - MCP integration unavailable
     build_server = None
+else:
+    build_server = _build_server
 
 # The MCP server is built per-lifespan, never at import time: the SDK's
 # StreamableHTTPSessionManager.run() may only be entered once per FastMCP
@@ -49,7 +54,7 @@ class _MCPMount:
     """
 
     def __init__(self) -> None:
-        self.current: Any = None
+        self.current: ASGIApp | None = None
         self.owner: Any = None
         # (server, app) pairs for every lifespan currently inside
         # session_manager.run(); the top pair owns current/owner.
@@ -57,9 +62,9 @@ class _MCPMount:
 
     async def __call__(
         self,
-        scope: dict[str, Any],
-        receive: Callable[[], Awaitable[dict[str, Any]]],
-        send: Callable[[dict[str, Any]], Awaitable[None]],
+        scope: Scope,
+        receive: Receive,
+        send: Send,
     ) -> None:
         app = self.current
         if app is None:
@@ -97,10 +102,10 @@ def _idempotent_write_path(path: str) -> bool:
 
 
 class IdempotencyMiddleware:
-    def __init__(self, app: Any) -> None:
+    def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
-    async def __call__(self, scope: dict[str, Any], receive: Callable[[], Awaitable[dict[str, Any]]], send: Callable[[dict[str, Any]], Awaitable[None]]) -> None:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope.get("type") != "http" or scope.get("method") not in {"POST", "PUT", "PATCH", "DELETE"}:
             await self.app(scope, receive, send)
             return
@@ -173,15 +178,15 @@ class IdempotencyMiddleware:
                     await Response('{"detail":"idempotent request collision"}', status_code=409, media_type="application/json", headers={"Retry-After": "1"})(scope, receive, send)
                     return
 
-        sent_start: dict[str, Any] | None = None
+        sent_start: Message | None = None
         response_chunks: list[bytes] = []
 
-        async def replay_receive() -> dict[str, Any]:
+        async def replay_receive() -> Message:
             nonlocal body
             data, body = body, b""
             return {"type": "http.request", "body": data, "more_body": False}
 
-        async def capture_send(message: dict[str, Any]) -> None:
+        async def capture_send(message: Message) -> None:
             nonlocal sent_start
             if message["type"] == "http.response.start":
                 sent_start = message
@@ -220,11 +225,11 @@ class IdempotencyMiddleware:
 
 
 class BodyLimitMiddleware:
-    def __init__(self, app: Any, max_bytes: int) -> None:
+    def __init__(self, app: ASGIApp, max_bytes: int) -> None:
         self.app = app
         self.max_bytes = max_bytes
 
-    async def __call__(self, scope: dict[str, Any], receive: Callable[[], Awaitable[dict[str, Any]]], send: Callable[[dict[str, Any]], Awaitable[None]]) -> None:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope.get("type") != "http":
             await self.app(scope, receive, send)
             return
@@ -239,7 +244,7 @@ class BodyLimitMiddleware:
                     return
         received = 0
 
-        async def limited_receive() -> dict[str, Any]:
+        async def limited_receive() -> Message:
             nonlocal received
             message = await receive()
             if message.get("type") == "http.request":
@@ -339,7 +344,9 @@ def _valid_service_bearer(request: Request) -> bool:
 
 
 @app.middleware("http")
-async def security_metrics_and_mcp_auth(request: Request, call_next: Callable) -> Response:
+async def security_metrics_and_mcp_auth(
+    request: Request, call_next: RequestResponseEndpoint
+) -> Response:
     start = time.perf_counter()
     protected_mcp = request.url.path.startswith("/mcp") and not _valid_service_bearer(request)
     protected_metrics = request.url.path == "/metrics" and not settings.metrics_public and not _valid_service_bearer(request)

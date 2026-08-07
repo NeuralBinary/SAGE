@@ -4,6 +4,7 @@ import argparse
 import copy
 import json
 import random
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -97,6 +98,10 @@ def main() -> None:
         ]
         results = []
         for command in commands:
+            executable = shutil.which(command[0])
+            if executable is None:
+                raise SystemExit(f"required runtime unavailable: {command[0]}")
+            command[0] = executable
             completed = subprocess.run(command, check=False, capture_output=True, text=True)
             if completed.returncode != 0:
                 raise SystemExit(completed.stdout + completed.stderr)

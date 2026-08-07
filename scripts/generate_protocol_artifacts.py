@@ -58,7 +58,10 @@ def artifacts() -> dict[Path, str]:
 
 
 def digest_map(values: dict[Path, str]) -> dict[str, str]:
-    return {str(path.relative_to(ROOT)): hashlib.sha256(text.encode()).hexdigest() for path, text in sorted(values.items(), key=lambda x: str(x[0]))}
+    return {
+        path.relative_to(ROOT).as_posix(): hashlib.sha256(text.encode()).hexdigest()
+        for path, text in sorted(values.items(), key=lambda item: item[0].as_posix())
+    }
 
 
 def main() -> None:

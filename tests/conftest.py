@@ -10,6 +10,11 @@ from sqlalchemy.orm import close_all_sessions
 
 _USE_CONFIGURED_DB = os.getenv("SAGE_TEST_USE_CONFIGURED_DB", "").lower() in {"1", "true", "yes"}
 _bootstrap_db = Path(tempfile.gettempdir()) / f"sage-pytest-{os.getpid()}.db"
+if os.name == "nt":
+    os.environ.setdefault(
+        "SAGE_SCRATCH_ROOT",
+        str(Path(tempfile.gettempdir()) / "sage-model-eval-scratch"),
+    )
 if not _USE_CONFIGURED_DB:
     os.environ["SAGE_DATABASE_URL"] = f"sqlite:///{_bootstrap_db}"
 os.environ["SAGE_AUTH_REQUIRED"] = "false"

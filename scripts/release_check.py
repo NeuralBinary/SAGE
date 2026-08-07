@@ -50,10 +50,20 @@ def main() -> None:
     dev_dependencies = project.get("optional-dependencies", {}).get("dev", [])
     require(any(dep.startswith("mypy") for dep in dev_dependencies), "mypy missing from dev dependencies")
     require(any(dep.startswith("pytest-cov") for dep in dev_dependencies), "pytest-cov missing from dev dependencies")
+    require((ROOT / "src/sage_plugin/py.typed").is_file(), "PEP 561 py.typed marker missing")
+    package_data = pyproject.get("tool", {}).get("setuptools", {}).get("package-data", {}).get("sage_plugin", [])
+    require("py.typed" in package_data, "py.typed missing from wheel package data")
 
     ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    require("mypy" in ci and "src/sage_plugin/security.py" in ci, "strict type-check CI gate missing")
-    require("--cov=sage_plugin" in ci and "--cov-fail-under=70" in ci, "coverage CI gate missing")
+    require("mypy src/sage_plugin" in ci, "whole-package strict type-check CI gate missing")
+    require("--cov=sage_plugin" in ci and "--cov-fail-under=80" in ci, "coverage CI gate missing")
+    require("permissions:\n  contents: read" in ci, "least-privilege CI permissions missing")
+
+    scale = (ROOT / ".github/workflows/scale.yml").read_text(encoding="utf-8")
+    require("permissions:\n  contents: read" in scale, "least-privilege scale permissions missing")
+    for community_file in ("CONTRIBUTING.md", "SECURITY.md", "SUPPORT.md", "CODE_OF_CONDUCT.md"):
+        require((ROOT / community_file).is_file(), f"community policy missing: {community_file}")
+    require((ROOT / ".github/dependabot.yml").is_file(), "Dependabot configuration missing")
 
     plugin = load_json("plugin.json")
     require(plugin["name"] == "SAGE", "plugin project name drift")
@@ -261,7 +271,7 @@ def main() -> None:
         if any(part in {".pytest_cache", ".ruff_cache", ".mypy_cache", "__pycache__"} for part in rel.parts):
             forbidden_artifacts.append(str(rel))
             continue
-        if path.is_file() and (path.suffix in {".pyc", ".db", ".sqlite", ".sqlite3"} or path.name.endswith(".egg-info")):
+        if path.is_file() and (path.name == ".coverage" or path.suffix in {".pyc", ".db", ".sqlite", ".sqlite3"} or path.name.endswith(".egg-info")):
             forbidden_artifacts.append(str(rel))
         if path.is_dir() and path.name.endswith(".egg-info"):
             forbidden_artifacts.append(str(rel))

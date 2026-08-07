@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal, cast
 
 from .a2a_adapter import pack_data_part, unpack_data_part
 from .bus import SemanticBus
@@ -357,7 +357,12 @@ def build_server() -> Any:
     @mcp.tool()
     def sage_delta(base: str, value: Any, mode: str = "target", workspace: str = "default") -> dict[str, Any]:
         """Create immutable target state plus lossless JSON Patch delta from a known base."""
-        req = StatePatchRequest(base=base, value=value, mode=mode, workspace=workspace)
+        req = StatePatchRequest(
+            base=base,
+            value=value,
+            mode=cast(Literal["target", "patch"], mode),
+            workspace=workspace,
+        )
         with SessionLocal() as db:
             item, delta = StateStore(db).transition(req.base, req.value, is_patch=req.mode == "patch", workspace=workspace)
             db.commit()

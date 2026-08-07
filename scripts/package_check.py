@@ -47,6 +47,11 @@ def check_source(path: Path) -> dict[str, object]:
             f"{SOURCE_PREFIX}quickstart.ps1",
             f"{SOURCE_PREFIX}docker-compose.quickstart.yml",
             f"{SOURCE_PREFIX}pyproject.toml",
+            f"{SOURCE_PREFIX}CONTRIBUTING.md",
+            f"{SOURCE_PREFIX}SECURITY.md",
+            f"{SOURCE_PREFIX}SUPPORT.md",
+            f"{SOURCE_PREFIX}CODE_OF_CONDUCT.md",
+            f"{SOURCE_PREFIX}.github/dependabot.yml",
             f"{SOURCE_PREFIX}scripts/build_release.py",
             f"{SOURCE_PREFIX}src/sage_plugin/doctor_cli.py",
             f"{SOURCE_PREFIX}src/sage_plugin/demo_cli.py",
@@ -88,6 +93,7 @@ def check_wheel(path: Path) -> dict[str, object]:
         require(metadata.get("Version") == VERSION, "wheel version drift")
         require(metadata.get("Author") == AUTHOR, "wheel author drift")
         required = {
+            "sage_plugin/py.typed",
             "sage_plugin/spec/SAGE-0.2.md",
             "sage_plugin/spec/sage-v0.2.proto",
             "sage_plugin/spec/schemas/wire-v2.schema.json",
