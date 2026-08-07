@@ -1,8 +1,12 @@
-.PHONY: install test lint security performance verify run docker quickstart release clean
+.PHONY: install test coverage typecheck lint security performance verify run docker quickstart release clean
 install:
 	python -m pip install -e '.[dev]'
 test:
 	pytest -q
+coverage:
+	pytest -q --cov=sage_plugin --cov-report=term-missing --cov-fail-under=70
+typecheck:
+	mypy src/sage_plugin/compiler.py src/sage_plugin/config.py src/sage_plugin/schemas.py src/sage_plugin/protocol_spec.py src/sage_plugin/spec_models.py src/sage_plugin/conformance.py src/sage_plugin/context_accounting.py src/sage_plugin/security.py src/sage_plugin/wire_codec.py src/sage_plugin/semantic_safety.py src/sage_plugin/signing.py
 lint:
 	ruff check src tests scripts
 security:
@@ -24,7 +28,8 @@ verify:
 	node scripts/openclaw_adapter_check.mjs
 	PYTHONPATH=src python scripts/differential_fuzz.py --iterations 250
 	PYTHONPATH=src python scripts/chaos_suite.py
-	pytest -q
+	$(MAKE) typecheck
+	$(MAKE) coverage
 	PYTHONPATH=src python scripts/performance_check.py --iterations 200
 	PYTHONPATH=src python -m sage_plugin.qualification --profile-encode --profile-iterations 30 --max-query-count 40
 	python -m compileall -q src tests scripts

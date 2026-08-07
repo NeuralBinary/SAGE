@@ -69,17 +69,17 @@ rm -rf integrations/openclaw/node_modules integrations/openclaw/package-lock.jso
 python scripts/release_check.py
 ```
 
-The OpenClaw `dist/` outputs (`dist/index.js`, `dist/conformance.js`) cannot be produced without this build step; `release_check.py` fails on their absence (this is the only failure recorded for the v0.2.2 worktree in `VERIFICATION.md`, pending the release workflow merge).
+The OpenClaw `dist/` outputs (`dist/index.js`, `dist/conformance.js`) cannot be produced without this build step; `release_check.py` fails when either output is absent or stale.
 
 ## Building a release
 
 ```bash
 python scripts/build_release.py --output dist
 python scripts/package_check.py \
-  --source dist/sage-plugin-v0.2.2.zip \
-  --wheel dist/sage_agent_protocol-0.2.2-py3-none-any.whl \
-  --hermes dist/sage-hermes-plugin-v0.2.2.zip \
-  --openclaw dist/sage-agent-openclaw-sage-0.2.2.tgz
+  --source dist/sage-plugin-v0.2.6.zip \
+  --wheel dist/sage_agent_protocol-0.2.6-py3-none-any.whl \
+  --hermes dist/sage-hermes-plugin-v0.2.6.zip \
+  --openclaw dist/sage-agent-openclaw-sage-0.2.6.tgz
 ```
 
 `scripts/package_check.py` verifies package metadata, author, the Hermes entry point, protocol specification, protobuf binding, nested JSON Schemas, TCK implementation matrix, and TCK vectors directly from the wheel archive, plus the OpenClaw package (`--openclaw`). For reproducible builds, the release workflow pins `SOURCE_DATE_EPOCH`.
@@ -87,17 +87,17 @@ python scripts/package_check.py \
 Release assets:
 
 ```text
-Python/runtime   -> sage_agent_protocol-0.2.2-py3-none-any.whl
-Hermes Agent     -> sage-hermes-plugin-v0.2.2.zip
-OpenClaw         -> sage-agent-openclaw-sage-0.2.2.tgz
-Source           -> sage-plugin-v0.2.2.zip
-Verification     -> SAGE-v0.2.2-VERIFICATION.md
-Checksums        -> SAGE-v0.2.2-SHA256SUMS.txt
+Python/runtime   -> sage_agent_protocol-0.2.6-py3-none-any.whl
+Hermes Agent     -> sage-hermes-plugin-v0.2.6.zip
+OpenClaw         -> sage-agent-openclaw-sage-0.2.6.tgz
+Source           -> sage-plugin-v0.2.6.zip
+Verification     -> SAGE-v0.2.6-VERIFICATION.md
+Checksums        -> SAGE-v0.2.6-SHA256SUMS.txt
 ```
 
 ## Release workflow
 
-Version identity is locked across `pyproject.toml`, `plugin.json`, the Python package, the Hermes manifest and adapter, the OpenClaw package and manifest, the spec, the TCK, and this documentation. Release commits prepare that identity (e.g. `release: prepare v0.2.2`).
+Version identity is locked across `pyproject.toml`, `plugin.json`, the Python package, the Hermes manifest and adapter, the OpenClaw package and manifest, the spec, the TCK, and current-release documentation. Release commits prepare that identity (e.g. `release: prepare v0.2.6`).
 
 Pushing a tag matching `v*` triggers `.github/workflows/release.yml`, which:
 
@@ -113,7 +113,7 @@ Pushing a tag matching `v*` triggers `.github/workflows/release.yml`, which:
 
 The `ci` workflow runs on push and pull request:
 
-- **python** — Python 3.11–3.14 matrix with Go 1.24 and Node 24.15.0: ruff, security/architecture/invariant checks, generated spec/protocol artifact checks, `sage-tck --json`, conformance matrix, differential fuzzing (250 iterations), chaos suite, byte compilation, full pytest, performance gate (80 iterations), encode query-budget profile, cache cleanup, `release_check.py` (after `rm -rf integrations/openclaw/node_modules ...`), and migration verification (`alembic upgrade head` + `alembic check` on SQLite).
+- **python** — Python 3.11–3.14 matrix with Go 1.24 and Node 24.15.0: ruff, a strict mypy gate over the protocol/configuration/security boundary, security/architecture/invariant checks, generated spec/protocol artifact checks, `sage-tck --json`, conformance matrix, differential fuzzing (250 iterations), chaos suite, byte compilation, full pytest with at least 70% source coverage, performance gate (200 iterations), encode query-budget profile, cache cleanup, `release_check.py` (after `rm -rf integrations/openclaw/node_modules ...`), and migration verification (`alembic upgrade head` + `alembic check` on SQLite).
 - **postgres** — Python 3.14 against PostgreSQL 18: `alembic upgrade head`/`check`, full suite with `SAGE_TEST_USE_CONFIGURED_DB=true`, configured-database concurrency (`--configured-concurrency --workers 8 --messages 20`), and configured-database ordering (`--configured-ordering`).
 - **dependency-audit** — installs `.[postgres,mcp,bench,otel]` and runs `pip-audit --local`.
 - **openclaw-adapter** — Node 24.15.0: `npm install --ignore-scripts`, `npm run check`, `npm run build`, `npm run tck`, `node --check dist/index.js`, `node scripts/openclaw_adapter_check.mjs`, `npm pack --ignore-scripts`, then `scripts/package_check.py --openclaw`.
@@ -122,9 +122,9 @@ The `ci` workflow runs on push and pull request:
 
 A dispatch-only `.github/workflows/scale.yml` accepts vocabulary-size and soak-duration inputs for sustained release-candidate qualification (default vocabulary 1,000,000 concepts; default soak 24 hours).
 
-## Qualification numbers (v0.2.2 verification record)
+## Qualification numbers (v0.2.6 verification record)
 
-- 111 tests pass against the installed wheel (107 tests at the v0.2.1 baseline working tree).
+- 236 tests pass on the release tree with the `[dev,mcp,bench,otel]` extras installed.
 - 13/13 TCK vectors in Python, JavaScript, and Go; 250/250 malformed-wire mutations; 1,000 cross-runtime differential comparisons.
 - 21 release invariants, each mapped to an executable qualification target (`scripts/invariant_check.py` passes).
 - OpenAPI builds as 3.1.0 with 81 paths.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import hashlib
 import json
 import math
@@ -62,10 +63,12 @@ class PatternStore:
         self.reliability = ReliabilityMonitor(db, settings)
         self.quotas = QuotaManager(db, settings)
 
-    def _candidate_windows(self, units: list[SemanticUnit]) -> list[list[SemanticUnit]]:
+    def _candidate_windows(
+        self, units: builtins.list[SemanticUnit]
+    ) -> builtins.list[builtins.list[SemanticUnit]]:
         if len(units) < self.settings.pattern_min_components:
             return []
-        out: list[list[SemanticUnit]] = []
+        out: builtins.list[builtins.list[SemanticUnit]] = []
         max_len = min(self.settings.pattern_max_components, len(units))
         for size in range(max_len, self.settings.pattern_min_components - 1, -1):
             for start in range(0, len(units) - size + 1):
@@ -77,16 +80,16 @@ class PatternStore:
     def observe_units(
         self,
         codebook: str,
-        units: list[SemanticUnit],
+        units: builtins.list[SemanticUnit],
         *,
-        source_ids: list[str] | None = None,
+        source_ids: builtins.list[str] | None = None,
         trust_score: float = 0.5,
         trust_scope: str | None = None,
         workspace: str = "default",
-    ) -> list[LearnedPattern]:
+    ) -> builtins.list[LearnedPattern]:
         if not self.settings.pattern_learning_enabled:
             return []
-        promoted: list[LearnedPattern] = []
+        promoted: builtins.list[LearnedPattern] = []
         seen_signatures: set[str] = set()
         for window in self._candidate_windows(units):
             composition = composition_for(
@@ -119,9 +122,9 @@ class PatternStore:
     def _observe_recursive(
         self,
         codebook: str,
-        units: list[SemanticUnit],
+        units: builtins.list[SemanticUnit],
         *,
-        source_ids: list[str] | None = None,
+        source_ids: builtins.list[str] | None = None,
         trust_score: float = 0.5,
         trust_scope: str | None = None,
         workspace: str = "default",
@@ -157,7 +160,7 @@ class PatternStore:
         self,
         codebook: str,
         signature: str,
-        source_ids: list[str] | None,
+        source_ids: builtins.list[str] | None,
         trust_score: float,
     ) -> tuple[int, float, float]:
         unique_sources = sorted({item.strip() for item in (source_ids or []) if item and item.strip()})
@@ -165,7 +168,7 @@ class PatternStore:
             unique_sources = ["anonymous"]
         trust_score = max(0.0, min(1.0, trust_score))
         dialect = self.db.get_bind().dialect.name
-        table = PatternSourceEvidence.__table__
+        table: Any = PatternSourceEvidence.__table__
         for source_id in unique_sources:
             source_hash = self._source_hash(source_id)
             values = {
@@ -176,35 +179,41 @@ class PatternStore:
                 "observation_count": 1,
             }
             if dialect == "postgresql":
-                from sqlalchemy.dialects.postgresql import insert
+                from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-                stmt = insert(table).values(**values)
-                stmt = stmt.on_conflict_do_update(
+                pg_stmt = pg_insert(table).values(**values)
+                pg_stmt = pg_stmt.on_conflict_do_update(
                     constraint="uq_pattern_source_evidence",
                     set_={
                         "observation_count": table.c.observation_count + 1,
                         "trust_score": case(
-                            (stmt.excluded.trust_score > table.c.trust_score, stmt.excluded.trust_score),
+                            (
+                                pg_stmt.excluded.trust_score > table.c.trust_score,
+                                pg_stmt.excluded.trust_score,
+                            ),
                             else_=table.c.trust_score,
                         ),
                     },
                 )
-                self.db.execute(stmt)
+                self.db.execute(pg_stmt)
             elif dialect == "sqlite":
-                from sqlalchemy.dialects.sqlite import insert
+                from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-                stmt = insert(table).values(**values)
-                stmt = stmt.on_conflict_do_update(
+                sqlite_stmt = sqlite_insert(table).values(**values)
+                sqlite_stmt = sqlite_stmt.on_conflict_do_update(
                     index_elements=[table.c.codebook, table.c.signature, table.c.source_hash],
                     set_={
                         "observation_count": table.c.observation_count + 1,
                         "trust_score": case(
-                            (stmt.excluded.trust_score > table.c.trust_score, stmt.excluded.trust_score),
+                            (
+                                sqlite_stmt.excluded.trust_score > table.c.trust_score,
+                                sqlite_stmt.excluded.trust_score,
+                            ),
                             else_=table.c.trust_score,
                         ),
                     },
                 )
-                self.db.execute(stmt)
+                self.db.execute(sqlite_stmt)
             else:
                 item = self.db.scalar(
                     select(PatternSourceEvidence).where(
@@ -256,12 +265,12 @@ class PatternStore:
     def observe(
         self,
         codebook: str,
-        composition: list[dict[str, Any]],
+        composition: builtins.list[dict[str, Any]],
         slot_sample: str | None = None,
         *,
         relation_structure: dict[str, Any] | None = None,
         signature_override: str | None = None,
-        source_ids: list[str] | None = None,
+        source_ids: builtins.list[str] | None = None,
         trust_score: float = 0.5,
         trust_scope: str | None = None,
         workspace: str = "default",
@@ -315,12 +324,12 @@ class PatternStore:
             "trust_score": weighted_trust,
         }
         dialect = self.db.get_bind().dialect.name
-        table = PatternCandidate.__table__
+        table: Any = PatternCandidate.__table__
         if dialect == "postgresql":
-            from sqlalchemy.dialects.postgresql import insert
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-            upsert = insert(table).values(**values)
-            upsert = upsert.on_conflict_do_update(
+            pg_upsert = pg_insert(table).values(**values)
+            pg_upsert = pg_upsert.on_conflict_do_update(
                 constraint="uq_pattern_candidate_signature",
                 set_={
                     "occurrence_count": table.c.occurrence_count + 1,
@@ -331,12 +340,12 @@ class PatternStore:
                     "trust_score": weighted_trust,
                 },
             )
-            self.db.execute(upsert)
+            self.db.execute(pg_upsert)
         elif dialect == "sqlite":
-            from sqlalchemy.dialects.sqlite import insert
+            from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-            upsert = insert(table).values(**values)
-            upsert = upsert.on_conflict_do_update(
+            sqlite_upsert = sqlite_insert(table).values(**values)
+            sqlite_upsert = sqlite_upsert.on_conflict_do_update(
                 index_elements=[table.c.codebook, table.c.signature],
                 set_={
                     "occurrence_count": table.c.occurrence_count + 1,
@@ -347,7 +356,7 @@ class PatternStore:
                     "trust_score": weighted_trust,
                 },
             )
-            self.db.execute(upsert)
+            self.db.execute(sqlite_upsert)
         else:
             candidate = self.db.scalar(candidate_stmt)
             if candidate is None:
@@ -412,11 +421,13 @@ class PatternStore:
             return self._promote_candidate(candidate)
         return None
 
-    def promote_ready_candidates(self, *, codebook: str | None = None, limit: int = 100) -> list[LearnedPattern]:
+    def promote_ready_candidates(
+        self, *, codebook: str | None = None, limit: int = 100
+    ) -> builtins.list[LearnedPattern]:
         stmt = select(PatternCandidate).order_by(PatternCandidate.occurrence_count.desc(), PatternCandidate.estimated_savings_bytes.desc()).limit(max(1, min(limit, 1000)))
         if codebook is not None:
             stmt = stmt.where(PatternCandidate.codebook == codebook)
-        promoted: list[LearnedPattern] = []
+        promoted: builtins.list[LearnedPattern] = []
         for candidate in self.db.scalars(stmt.with_for_update(skip_locked=True)):
             score = math.log1p(candidate.occurrence_count) * (candidate.estimated_savings_bytes / 64.0) * max(0.05, 1.0 - candidate.semantic_variance)
             if (
@@ -509,14 +520,16 @@ class PatternStore:
     def by_concept_id(self, concept_id: int) -> LearnedPattern | None:
         return self.db.scalar(select(LearnedPattern).where(LearnedPattern.concept_id == concept_id))
 
-    def list(self, codebook: str, *, status: str | None = None) -> list[LearnedPattern]:
+    def list(
+        self, codebook: str, *, status: str | None = None
+    ) -> builtins.list[LearnedPattern]:
         namespaces = self.codebook.namespace_chain(codebook)
         stmt = select(LearnedPattern).where(LearnedPattern.codebook.in_(namespaces))
         if status:
             stmt = stmt.where(LearnedPattern.status == status)
         return list(self.db.scalars(stmt.order_by(LearnedPattern.id)))
 
-    def candidates(self, codebook: str) -> list[PatternCandidate]:
+    def candidates(self, codebook: str) -> builtins.list[PatternCandidate]:
         namespaces = self.codebook.namespace_chain(codebook)
         return list(
             self.db.scalars(
@@ -543,11 +556,13 @@ class PatternStore:
             return True, unit.literal, True
         return (not unit.has_literal), None, False
 
-    def match_pattern_at(self, pattern: LearnedPattern, units: list[SemanticUnit], start: int) -> PatternMatch | None:
+    def match_pattern_at(
+        self, pattern: LearnedPattern, units: builtins.list[SemanticUnit], start: int
+    ) -> PatternMatch | None:
         composition = list(pattern.composition or [])
         if start + len(composition) > len(units):
             return None
-        bindings: list[Any] = []
+        bindings: builtins.list[Any] = []
         for offset, component in enumerate(composition):
             ok, binding, has_binding = self._match_component(component, units[start + offset])
             if not ok:
@@ -556,10 +571,12 @@ class PatternStore:
                 bindings.append(binding)
         return PatternMatch(pattern=pattern, start=start, end=start + len(composition), bindings=bindings)
 
-    def matches(self, codebook: str, units: list[SemanticUnit], *, statuses: set[str]) -> list[PatternMatch]:
+    def matches(
+        self, codebook: str, units: builtins.list[SemanticUnit], *, statuses: set[str]
+    ) -> builtins.list[PatternMatch]:
         patterns = [p for p in self.list(codebook) if p.status in statuses]
         patterns.sort(key=lambda p: (len(p.composition or []), p.estimated_savings_bytes), reverse=True)
-        matches: list[PatternMatch] = []
+        matches: builtins.list[PatternMatch] = []
         for start in range(len(units)):
             for pattern in patterns:
                 match = self.match_pattern_at(pattern, units, start)
@@ -570,18 +587,18 @@ class PatternStore:
     def active_matches(
         self,
         codebook: str,
-        units: list[SemanticUnit],
+        units: builtins.list[SemanticUnit],
         *,
         receiver: str | None = None,
         model: str | None = None,
         workspace: str = "default",
         task_family: str = "*",
-    ) -> list[PatternMatch]:
+    ) -> builtins.list[PatternMatch]:
         raw = self.matches(codebook, units, statuses={"active"})
         if receiver or model:
             raw = [m for m in raw if self.receiver_fidelity(m.pattern, receiver or "*", model or "*", workspace, task_family) >= self.settings.pattern_receiver_min_fidelity]
         raw.sort(key=lambda m: (m.start, -(m.end - m.start), -self.utility_score(m.pattern), -m.pattern.estimated_savings_bytes))
-        selected: list[PatternMatch] = []
+        selected: builtins.list[PatternMatch] = []
         occupied: set[int] = set()
         for match in raw:
             span = set(range(match.start, match.end))
@@ -591,7 +608,9 @@ class PatternStore:
             occupied.update(span)
         return selected
 
-    def shadow_matches(self, codebook: str, units: list[SemanticUnit]) -> list[PatternMatch]:
+    def shadow_matches(
+        self, codebook: str, units: builtins.list[SemanticUnit]
+    ) -> builtins.list[PatternMatch]:
         return self.matches(codebook, units, statuses={"shadow", "validated"})
 
     def utility_score(self, pattern: LearnedPattern) -> float:
@@ -756,8 +775,10 @@ class PatternStore:
         self.db.flush()
         return {"patterns_cooling": cooling, "patterns_retired": retired}
 
-    def record_feedback(self, decisions: list[dict[str, Any]], task_success: float) -> list[LearnedPattern]:
-        touched: list[LearnedPattern] = []
+    def record_feedback(
+        self, decisions: builtins.list[dict[str, Any]], task_success: float
+    ) -> builtins.list[LearnedPattern]:
+        touched: builtins.list[LearnedPattern] = []
         seen: set[str] = set()
         for decision in decisions:
             pattern_id = decision.get("pattern_id")

@@ -6,7 +6,7 @@ import json
 import random
 from dataclasses import dataclass
 from importlib.resources import files
-from typing import Any
+from typing import Any, cast
 
 from .a2a_adapter import pack_data_part, unpack_data_part
 from .protocol_spec import (
@@ -33,7 +33,7 @@ class TckResult:
 
 def _load_vectors() -> dict[str, Any]:
     resource = files("sage_plugin").joinpath("tck/vectors/core.json")
-    return json.loads(resource.read_text(encoding="utf-8"))
+    return cast(dict[str, Any], json.loads(resource.read_text(encoding="utf-8")))
 
 
 def run_tck() -> TckResult:

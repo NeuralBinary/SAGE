@@ -82,6 +82,7 @@ async def require_api_key(
     authorization: str | None = Header(default=None),
 ) -> AuthPrincipal:
     settings = get_settings()
+    principal: AuthPrincipal | None
     if not settings.auth_required:
         principal = AuthPrincipal("development")
         _principal.set(principal)

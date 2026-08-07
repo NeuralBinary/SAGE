@@ -3,9 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
-import msgpack
+import msgpack  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 SAGE_PROTOCOL = "sage/0.2"
@@ -113,7 +113,7 @@ def canonical_json_bytes(value: Any) -> bytes:
 
 def canonical_msgpack_bytes(value: Any) -> bytes:
     normalized = _normalized(value)
-    return msgpack.packb(normalized, use_bin_type=True, strict_types=True)
+    return cast(bytes, msgpack.packb(normalized, use_bin_type=True, strict_types=True))
 
 
 def canonical_digest(value: Any) -> str:

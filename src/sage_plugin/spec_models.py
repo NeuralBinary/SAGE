@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -13,7 +13,7 @@ class SpecModel(BaseModel):
 
 
 class ProtocolPacket(SpecModel):
-    v: Literal["sage/0.2"] = SAGE_PROTOCOL
+    v: Literal["sage/0.2"] = cast(Literal["sage/0.2"], SAGE_PROTOCOL)
     id: str | None = None
     cb: str
     sender: str | None = None
@@ -103,7 +103,7 @@ class ProtocolPattern(SpecModel):
 
 
 class ProtocolCapability(SpecModel):
-    protocol: Literal["sage/0.2"] = SAGE_PROTOCOL
+    protocol: Literal["sage/0.2"] = cast(Literal["sage/0.2"], SAGE_PROTOCOL)
     capabilities: Capabilities = Field(default_factory=Capabilities)
     codebook_fingerprints: dict[str, str] = Field(default_factory=dict)
 

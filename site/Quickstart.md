@@ -37,12 +37,12 @@ The quickstart Compose file runs SAGE in development mode with a SQLite database
 
 ## Python release install
 
-Python 3.11 or newer is required. Install the v0.2.2 release wheel directly from the GitHub release:
+Python 3.11 or newer is required. Install the v0.2.6 release wheel directly from the GitHub release:
 
 ```bash
 python -m venv .venv
 . .venv/bin/activate              # Windows: .venv\Scripts\Activate.ps1
-python -m pip install https://github.com/NeuralBinary/SAGE/releases/download/v0.2.2/sage_agent_protocol-0.2.2-py3-none-any.whl
+python -m pip install https://github.com/NeuralBinary/SAGE/releases/download/v0.2.6/sage_agent_protocol-0.2.6-py3-none-any.whl
 ```
 
 Start a local service with authentication disabled **only on a trusted interface**:
@@ -77,19 +77,19 @@ sage-demo --url http://127.0.0.1:8080 --single-agent
 
 ## Install the Hermes plugin
 
-Download `sage-hermes-plugin-v0.2.2.zip` from the [v0.2.2 GitHub release](https://github.com/NeuralBinary/SAGE/releases/tag/v0.2.2), then:
+Download `sage-hermes-plugin-v0.2.6.zip` from the [v0.2.6 GitHub release](https://github.com/NeuralBinary/SAGE/releases/tag/v0.2.6), then:
 
 ```bash
-unzip sage-hermes-plugin-v0.2.2.zip
-cd sage-hermes-plugin-v0.2.2
+unzip sage-hermes-plugin-v0.2.6.zip
+cd sage-hermes-plugin-v0.2.6
 ./install.sh
 ```
 
 Windows PowerShell:
 
 ```powershell
-Expand-Archive .\sage-hermes-plugin-v0.2.2.zip
-cd .\sage-hermes-plugin-v0.2.2
+Expand-Archive .\sage-hermes-plugin-v0.2.6.zip
+cd .\sage-hermes-plugin-v0.2.6
 .\install.ps1
 ```
 
@@ -111,10 +111,10 @@ Full Docker and Windows instructions are in `integrations/hermes/README.md`. See
 
 ## Install the OpenClaw plugin
 
-Download `sage-agent-openclaw-sage-0.2.2.tgz` from the [v0.2.2 GitHub release](https://github.com/NeuralBinary/SAGE/releases/tag/v0.2.2), then install the native plugin:
+Download `sage-agent-openclaw-sage-0.2.6.tgz` from the [v0.2.6 GitHub release](https://github.com/NeuralBinary/SAGE/releases/tag/v0.2.6), then install the native plugin:
 
 ```bash
-openclaw plugins install npm-pack:./sage-agent-openclaw-sage-0.2.2.tgz
+openclaw plugins install npm-pack:./sage-agent-openclaw-sage-0.2.6.tgz
 openclaw plugins enable sage
 openclaw plugins inspect sage --runtime --json
 ```

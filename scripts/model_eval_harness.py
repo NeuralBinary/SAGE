@@ -404,7 +404,11 @@ def _scratch_db_path() -> Path:
     process's atexit cleanup only ever touches its own file, and per-variant
     schema resets can never race on a shared database.
     """
-    return Path.home() / ".sage-bench" / f"model_eval_harness-{os.getpid()}.db"
+    # Respect an explicit HOME on every platform. pathlib.Path.home() ignores
+    # HOME on Windows, which previously made isolated harness runs write to the
+    # real user profile instead of the caller-provided scratch home.
+    home = Path(os.environ["HOME"]) if os.environ.get("HOME") else Path.home()
+    return home / ".sage-bench" / f"model_eval_harness-{os.getpid()}.db"
 
 
 def _cleanup_scratch_db() -> None:
@@ -500,10 +504,16 @@ def _invoke(command: list[str], payload: dict[str, Any], timeout: float, identit
     filesystem access could still read the harness's own source (which
     embeds the benchmark fixture) or guess the scratch database path
     (``~/.sage-bench/model_eval_harness-<pid>.db``); the harness adds no
-    channel beyond that ambient reality.  ``HOME``/``PATH`` and all non-SAGE
-    variables pass through unchanged.
+    channel beyond that ambient reality. ``HOME``/``PATH`` and all non-SAGE
+    variables pass through unchanged, except that Windows receives a standard
+    ``HOME`` value and ``USERPROFILE`` is aligned with it so child adapters
+    resolve one isolated home directory consistently.
     """
     started = time.perf_counter()
+    child_env = {k: v for k, v in os.environ.items() if not k.startswith("SAGE_")}
+    if os.name == "nt":
+        child_env.setdefault("HOME", child_env.get("USERPROFILE", str(Path.home())))
+        child_env["USERPROFILE"] = child_env["HOME"]
     try:
         completed = subprocess.run(
             command,
@@ -512,7 +522,7 @@ def _invoke(command: list[str], payload: dict[str, Any], timeout: float, identit
             capture_output=True,
             timeout=timeout,
             check=False,
-            env={k: v for k, v in os.environ.items() if not k.startswith("SAGE_")},
+            env=child_env,
         )
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(f"adapter {identity} timed out after {timeout}s") from exc

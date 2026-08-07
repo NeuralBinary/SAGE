@@ -47,6 +47,13 @@ def main() -> None:
     scripts = project.get("scripts", {})
     require(scripts.get("sage-doctor") == "sage_plugin.doctor_cli:main", "sage-doctor entry point drift")
     require(scripts.get("sage-demo") == "sage_plugin.demo_cli:main", "sage-demo entry point drift")
+    dev_dependencies = project.get("optional-dependencies", {}).get("dev", [])
+    require(any(dep.startswith("mypy") for dep in dev_dependencies), "mypy missing from dev dependencies")
+    require(any(dep.startswith("pytest-cov") for dep in dev_dependencies), "pytest-cov missing from dev dependencies")
+
+    ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    require("mypy" in ci and "src/sage_plugin/security.py" in ci, "strict type-check CI gate missing")
+    require("--cov=sage_plugin" in ci and "--cov-fail-under=70" in ci, "coverage CI gate missing")
 
     plugin = load_json("plugin.json")
     require(plugin["name"] == "SAGE", "plugin project name drift")
@@ -60,6 +67,31 @@ def main() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     for value in ["Project | SAGE", "Author | NeuralBinary", EXPECTED_REPOSITORY, "@NeuralBinary, @ro0ti", f"Version | {EXPECTED_RELEASE}"]:
         require(value in readme, f"README metadata missing: {value}")
+
+    current_release_docs = [
+        "docs/GETTING_STARTED.md",
+        "docs/OPERATIONS.md",
+        "site/Adapters.md",
+        "site/CLI-Tools.md",
+        "site/Development.md",
+        "site/Quickstart.md",
+    ]
+    release_coordinate_patterns = [
+        re.compile(r"github\.com/NeuralBinary/SAGE/releases/(?:download|tag)/v(\d+\.\d+\.\d+)"),
+        re.compile(
+            r"(?:sage_agent_protocol-|sage-hermes-plugin-v|sage-agent-openclaw-sage-"
+            r"|sage-plugin-v|SAGE-v)(\d+\.\d+\.\d+)"
+        ),
+        re.compile(r"@sage-agent/openclaw-sage@(\d+\.\d+\.\d+)"),
+        re.compile(r"release checker enforces version `(\d+\.\d+\.\d+)`", re.IGNORECASE),
+    ]
+    for rel in current_release_docs:
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        require(EXPECTED_VERSION in text, f"current-release documentation missing {EXPECTED_VERSION}: {rel}")
+        for pattern in release_coordinate_patterns:
+            stale = sorted({match.group(1) for match in pattern.finditer(text) if match.group(1) != EXPECTED_VERSION})
+            require(not stale, f"stale release coordinates in {rel}: {stale}")
+
     license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
     require("Copyright (c) 2026 NeuralBinary" in license_text, "license attribution drift")
 

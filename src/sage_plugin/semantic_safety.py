@@ -6,8 +6,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from .compiler import SemanticUnit, normalize
+from .schemas import EpistemicType
 
-EPISTEMIC_TYPES = {
+EPISTEMIC_TYPES: set[EpistemicType] = {
     "fact",
     "observation",
     "inference",
@@ -30,7 +31,7 @@ _CRITICAL_TEXT_RE = re.compile(
     r"delete|deny|allow|before|after|until|deadline|expires?|\$?\d+(?:\.\d+)?)\b",
     re.I,
 )
-_EPISTEMIC_HINTS = {
+_EPISTEMIC_HINTS: dict[EpistemicType, set[str]] = {
     "observation": {"observed", "observation", "measured", "measurement"},
     "inference": {"inference", "derived", "conclusion", "because"},
     "hypothesis": {"hypothesis", "maybe", "possible", "suspect", "assumption"},
@@ -45,14 +46,14 @@ _EPISTEMIC_HINTS = {
 class SemanticRisk:
     score: float
     reasons: tuple[str, ...]
-    epistemic_type: str
+    epistemic_type: EpistemicType
 
     @property
     def critical(self) -> bool:
         return self.score >= 0.7
 
 
-def infer_epistemic_type(path: str, canonical: str, surface: str | None = None) -> str:
+def infer_epistemic_type(path: str, canonical: str, surface: str | None = None) -> EpistemicType:
     text = normalize(" ".join(filter(None, [path, canonical, surface or ""])))
     terms = set(re.split(r"[_.:/-]+", text))
     for kind, hints in _EPISTEMIC_HINTS.items():

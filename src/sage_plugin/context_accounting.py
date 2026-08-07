@@ -131,7 +131,7 @@ def estimate_tokens(text: str, chars_per_token: float = _DEFAULT_CHARS_PER_TOKEN
             if _encoder is None and not _tiktoken_attempted:
                 _tiktoken_attempted = True
                 try:
-                    import tiktoken  # type: ignore[import-not-found]
+                    import tiktoken
 
                     _encoder = tiktoken.get_encoding(_TIKTOKEN_ENCODING)
                 except Exception:

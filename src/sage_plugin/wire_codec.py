@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from .config import Settings
 from .protocol_spec import (
@@ -10,7 +10,7 @@ from .protocol_spec import (
     canonical_msgpack_bytes,
     validate_wire_v2,
 )
-from .schemas import Atom, Packet, Provenance
+from .schemas import Atom, EpistemicType, Packet, Provenance, TraceContext
 from .signing import verify_wire
 
 
@@ -43,6 +43,7 @@ class WireCodec:
         if packet.delta is not None:
             payload["d"] = packet.delta
         prov = packet.prov
+        observed: int | str
         try:
             observed = int(datetime.fromisoformat(prov.observed_at).timestamp())
         except ValueError:
@@ -82,7 +83,8 @@ class WireCodec:
             Atom(
                 code=atom.get("c"), cv=atom.get("v"), literal=atom.get("l"),
                 has_literal=bool(atom.get("h", "l" in atom)), path=atom.get("p"),
-                confidence=float(atom.get("q", 1.0)), epistemic_type=str(atom.get("e", "fact")),
+                confidence=float(atom.get("q", 1.0)),
+                epistemic_type=cast(EpistemicType, str(atom.get("e", "fact"))),
             )
             for atom in payload.get("x", [])
         ]
@@ -91,5 +93,9 @@ class WireCodec:
             act=str(payload.get("a", "report")), atoms=atoms, refs=list(payload.get("R", [])), base=payload.get("b"),
             delta=payload.get("d"), prov=prov, meta=dict(payload.get("m", {})),
             signature=dict(payload.get("g", {})) if payload.get("g") else None,
-            trace={"traceparent": payload["z"]["p"], "tracestate": payload["z"].get("s")} if payload.get("z") else None,
+            trace=TraceContext(
+                traceparent=payload["z"]["p"], tracestate=payload["z"].get("s")
+            )
+            if payload.get("z")
+            else None,
         )

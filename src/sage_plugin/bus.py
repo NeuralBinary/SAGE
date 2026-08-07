@@ -35,19 +35,28 @@ class SemanticBus:
     def _next_sequence(self, workspace: str, ordering_key: str) -> int:
         now = _utcnow()
         dialect = self.db.bind.dialect.name if self.db.bind is not None else ""
-        if dialect in {"sqlite", "postgresql"}:
-            if dialect == "sqlite":
-                from sqlalchemy.dialects.sqlite import insert
-            else:
-                from sqlalchemy.dialects.postgresql import insert
-            stmt = insert(OrderingCounter).values(
+        if dialect == "sqlite":
+            from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+            sqlite_stmt = sqlite_insert(OrderingCounter).values(
                 workspace=workspace, ordering_key=ordering_key, sequence_no=1, updated_at=now
             )
-            stmt = stmt.on_conflict_do_update(
+            sqlite_upsert = sqlite_stmt.on_conflict_do_update(
                 index_elements=[OrderingCounter.workspace, OrderingCounter.ordering_key],
                 set_={"sequence_no": OrderingCounter.sequence_no + 1, "updated_at": now},
             ).returning(OrderingCounter.sequence_no)
-            return int(self.db.execute(stmt).scalar_one())
+            return int(self.db.execute(sqlite_upsert).scalar_one())
+        if dialect == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+            pg_stmt = pg_insert(OrderingCounter).values(
+                workspace=workspace, ordering_key=ordering_key, sequence_no=1, updated_at=now
+            )
+            pg_upsert = pg_stmt.on_conflict_do_update(
+                index_elements=[OrderingCounter.workspace, OrderingCounter.ordering_key],
+                set_={"sequence_no": OrderingCounter.sequence_no + 1, "updated_at": now},
+            ).returning(OrderingCounter.sequence_no)
+            return int(self.db.execute(pg_upsert).scalar_one())
         counter = self.db.scalar(
             select(OrderingCounter)
             .where(OrderingCounter.workspace == workspace, OrderingCounter.ordering_key == ordering_key)
@@ -160,10 +169,12 @@ class SemanticBus:
                     raise ValueError("idempotency key reused for a different handoff")
                 return existing
         self.quotas.enforce_handoff(workspace, sender)
+        ref_bytes_avoided = 0
         for ref_id in refs:
-            item = self.codec.refs.get(ref_id, actor=sender, workspace=workspace)
-            if item is None:
+            ref_item = self.codec.refs.get(ref_id, actor=sender, workspace=workspace)
+            if ref_item is None:
                 raise KeyError(ref_id)
+            ref_bytes_avoided += ref_item.byte_size
             grant = self.codec.refs.grant_metadata(ref_id, actor=sender, workspace=workspace)
             if grant.owner != sender:
                 raise PermissionError("only the explicit reference owner can forward it")
@@ -200,7 +211,7 @@ class SemanticBus:
             packet_id=packet.id or "", run_id=run_id, sender=sender, receiver=receiver, workspace=workspace, strategy="zero_copy",
             cache_hit=False, input_bytes=0, output_bytes=len(packed), estimated_tokens=item.estimated_tokens, budget_tokens=None,
             atom_count=0, ref_count=len(refs), packet=packet.model_dump(exclude_none=True),
-            decisions=[{"action": "zero_copy_forward", "refs": refs}], provenance=packet.prov.model_dump(), ref_bytes_avoided=sum((self.codec.refs.get(r, actor=receiver, workspace=workspace).byte_size for r in refs), 0),
+            decisions=[{"action": "zero_copy_forward", "refs": refs}], provenance=packet.prov.model_dump(), ref_bytes_avoided=ref_bytes_avoided,
         ))
         self.db.flush()
         return item

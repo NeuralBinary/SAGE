@@ -1,7 +1,7 @@
 
 # CLI Tools
 
-The wheel (`sage_agent_protocol-0.2.2`) installs **12 console scripts**, declared in `[project.scripts]` in `pyproject.toml`. The short table below mirrors the README; each command then gets a paragraph and example.
+The wheel (`sage_agent_protocol-0.2.6`) installs **12 console scripts**, declared in `[project.scripts]` in `pyproject.toml`. The short table below mirrors the README; each command then gets a paragraph and example.
 
 | Command | Purpose |
 | --- | --- |

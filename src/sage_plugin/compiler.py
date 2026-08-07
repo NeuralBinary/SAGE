@@ -44,10 +44,10 @@ def compile_content(value: Any, path: str = "$", depth: int = 0) -> list[Semanti
                 )
         return out
     if isinstance(value, list):
-        out: list[SemanticUnit] = []
+        list_out: list[SemanticUnit] = []
         for idx, child in enumerate(value):
-            out.extend(compile_content(child, f"{path}[{idx}]", depth + 1))
-        return out
+            list_out.extend(compile_content(child, f"{path}[{idx}]", depth + 1))
+        return list_out
     if isinstance(value, str):
         stripped = value.strip()
         if not stripped:

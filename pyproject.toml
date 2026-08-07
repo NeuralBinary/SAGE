@@ -37,6 +37,7 @@ bench = ["tiktoken>=0.13,<1"]
 otel = ["opentelemetry-api>=1.44,<2", "opentelemetry-sdk>=1.44,<2"]
 dev = [
   "pytest>=9.1.1,<10",
+  "pytest-cov>=7,<8",
   "httpx>=0.28.1,<1",
   "ruff>=0.15.22,<1",
   "mypy>=2.3,<3",
@@ -79,6 +80,13 @@ ignore = ["B008", "E501"]
 python_version = "3.11"
 strict = true
 warn_unused_ignores = true
+
+[tool.coverage.run]
+source = ["sage_plugin"]
+
+[tool.coverage.report]
+fail_under = 70
+show_missing = true
 
 [tool.setuptools.package-data]
 sage_plugin = ["spec/*", "spec/schemas/*.json", "tck/*.json", "tck/vectors/*.json"]

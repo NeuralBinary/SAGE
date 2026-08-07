@@ -35,7 +35,7 @@ sage-conform --fuzz 1000
 python scripts/release_check.py
 ```
 
-The release checker enforces version `0.2.2`, protocol `sage/0.2`, wire `2`, one baseline migration, repo/package schema equality, spec/protobuf equality and TCK equality. `python scripts/conformance_matrix.py` requires Python, JavaScript, and Go. `python scripts/differential_fuzz.py` compares canonical MessagePack identity and validation behavior across the independent runtimes.
+The release checker enforces version `0.2.6`, protocol `sage/0.2`, wire `2`, one baseline migration, repo/package schema equality, spec/protobuf equality and TCK equality. `python scripts/conformance_matrix.py` requires Python, JavaScript, and Go. `python scripts/differential_fuzz.py` compares canonical MessagePack identity and validation behavior across the independent runtimes.
 
 ## Backups
 

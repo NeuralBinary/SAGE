@@ -15,6 +15,10 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _default_fallback_modes() -> list[FallbackMode]:
+    return ["natural_language", "literal", "reference"]
+
+
 class Provenance(BaseModel):
     source_ids: list[str] = Field(default_factory=list)
     observed_at: str = Field(default_factory=_now_iso)
@@ -441,7 +445,7 @@ class Capabilities(BaseModel):
     supports_deltas: bool = True
     supports_patterns: bool = True
     latent_spaces: list[str] = Field(default_factory=list)
-    fallback_modes: list[FallbackMode] = Field(default_factory=lambda: ["natural_language", "literal", "reference"])
+    fallback_modes: list[FallbackMode] = Field(default_factory=_default_fallback_modes)
 
 
 class NegotiateRequest(BaseModel):

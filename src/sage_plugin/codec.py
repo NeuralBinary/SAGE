@@ -130,11 +130,12 @@ class SageCodec:
                 promoted = []
                 decisions.append({"action": "optional_subsystem_fallback", "subsystem": "pattern_learning", "error": type(exc).__name__})
             for pattern in promoted:
+                promoted_concept = self.db.get(Concept, pattern.concept_id)
                 decisions.append({
                     "action": "pattern_promoted_to_shadow",
                     "pattern_id": pattern.pattern_id,
                     "canonical": pattern.canonical,
-                    "concept_code": self.db.get(Concept, pattern.concept_id).code if self.db.get(Concept, pattern.concept_id) else None,
+                    "concept_code": promoted_concept.code if promoted_concept is not None else None,
                 })
 
         seen_shadow: set[str] = set()

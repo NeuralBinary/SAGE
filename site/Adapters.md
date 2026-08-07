@@ -9,7 +9,7 @@ A key rule applies to every adapter: **adapters must not construct SAGE semantic
 
 The Hermes adapter ships two ways, kept byte-identical by release checks:
 
-1. The standalone release ZIP (`sage-hermes-plugin-v0.2.2.zip`), which extracts into one versioned directory with installers, README, license, plugin manifest, and adapter.
+1. The standalone release ZIP (`sage-hermes-plugin-v0.2.6.zip`), which extracts into one versioned directory with installers, README, license, plugin manifest, and adapter.
 2. The packaged Python entry point `hermes_agent.plugins:sage = sage_plugin.hermes_plugin` declared in `pyproject.toml`.
 
 ### Integration surface
@@ -27,7 +27,7 @@ The release plugin is self-contained and uses only the Python standard library i
 
 ```yaml
 name: sage
-version: "0.2.2"
+version: "0.2.6"
 description: Vendor-neutral SAGE semantic bus with automatic context injection and structured handoff.
 requires_env:
   - SAGE_URL
@@ -52,8 +52,8 @@ SAGE_MAX_INJECT_TOKENS=1200
 ### Install and verify
 
 ```bash
-unzip sage-hermes-plugin-v0.2.2.zip
-cd sage-hermes-plugin-v0.2.2
+unzip sage-hermes-plugin-v0.2.6.zip
+cd sage-hermes-plugin-v0.2.6
 ./install.sh
 ```
 
@@ -63,7 +63,7 @@ For Hermes in Docker: `./install.sh "$HERMES_DATA_DIR"`; when SAGE runs on the D
 
 ## OpenClaw plugin
 
-`integrations/openclaw` is a native mixed tool/hook plugin (`@sage-agent/openclaw-sage@0.2.2`), built from TypeScript (`src/index.ts`) with an independent conformance runner (`dist/conformance.js`).
+`integrations/openclaw` is a native mixed tool/hook plugin (`@sage-agent/openclaw-sage@0.2.6`), built from TypeScript (`src/index.ts`) with an independent conformance runner (`dist/conformance.js`).
 
 ### Integration surface
 
@@ -97,7 +97,7 @@ The plugin also falls back to environment variables (`SAGE_URL`, `SAGE_AGENT_ID`
 ### Install and verify
 
 ```bash
-openclaw plugins install npm-pack:./sage-agent-openclaw-sage-0.2.2.tgz
+openclaw plugins install npm-pack:./sage-agent-openclaw-sage-0.2.6.tgz
 openclaw plugins enable sage
 openclaw plugins inspect sage --runtime --json
 ```

@@ -123,17 +123,22 @@ class QuotaManager:
         start = _window_start(now, self.settings.quota_window_seconds)
         values = {"workspace": workspace, "resource": resource, "window_start": start, "used": amount, "updated_at": now}
         dialect = self.db.bind.dialect.name if self.db.bind is not None else ""
-        if dialect in {"sqlite", "postgresql"}:
-            if dialect == "sqlite":
-                from sqlalchemy.dialects.sqlite import insert
-            else:
-                from sqlalchemy.dialects.postgresql import insert
-            stmt = insert(QuotaCounter).values(**values)
-            stmt = stmt.on_conflict_do_update(
+        if dialect == "sqlite":
+            from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+            sqlite_stmt = sqlite_insert(QuotaCounter).values(**values).on_conflict_do_update(
                 index_elements=[QuotaCounter.workspace, QuotaCounter.resource, QuotaCounter.window_start],
                 set_={"used": QuotaCounter.used + amount, "updated_at": now},
             ).returning(QuotaCounter.used)
-            used = int(self.db.execute(stmt).scalar_one())
+            used = int(self.db.execute(sqlite_stmt).scalar_one())
+        elif dialect == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+            pg_stmt = pg_insert(QuotaCounter).values(**values).on_conflict_do_update(
+                index_elements=[QuotaCounter.workspace, QuotaCounter.resource, QuotaCounter.window_start],
+                set_={"used": QuotaCounter.used + amount, "updated_at": now},
+            ).returning(QuotaCounter.used)
+            used = int(self.db.execute(pg_stmt).scalar_one())
         else:
             item = self.db.scalar(
                 select(QuotaCounter)
