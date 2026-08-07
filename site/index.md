@@ -15,7 +15,7 @@ SAGE core is independent of model providers and agent frameworks. Native and pro
 | Package version | 0.2.6 |
 | Protocol | `sage/0.2` |
 | Wire version | `2` |
-| License | MIT |
+| License | AGPL-3.0 + Commercial (dual-license) |
 
 ## Key capabilities
 
@@ -76,6 +76,11 @@ The repository ships a verification record (`VERIFICATION.md` in the repo root).
 
 ## License and attribution
 
-SAGE is licensed under the MIT License. Author: NeuralBinary. Credits: @NeuralBinary, @ro0ti.
+SAGE is dual-licensed:
+
+- **AGPL-3.0** — Free for open source projects, research, and community use, subject to the terms in the repository [LICENSE](https://github.com/NeuralBinary/SAGE/blob/main/LICENSE).
+- **Commercial License** — For organizations that want to use SAGE in proprietary products, closed-source services, or SaaS offerings without the AGPL's source-disclosure requirements. See [COMMERCIAL.md](https://github.com/NeuralBinary/SAGE/blob/main/COMMERCIAL.md) or contact **sage@digitalacre.org**.
+
+Author: NeuralBinary. Credits: @NeuralBinary, @ro0ti.
 
 Next: [Quickstart](Quickstart.md)
